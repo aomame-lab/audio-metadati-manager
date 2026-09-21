@@ -1,4 +1,4 @@
-# Audio Manager — Python dependencies
+# Audio Metadati Manager — Python dependencies
 # The Python core uses mutagen for reading and writing audio metadata
 # and embedded album artwork.
 mutagen>=1.46

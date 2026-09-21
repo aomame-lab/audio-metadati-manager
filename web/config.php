@@ -1,6 +1,6 @@
 <?php
 /**
- * Audio Manager - Configuration loader
+ * Audio Metadati Manager - Configuration loader
  *
  * This file is portable and safe to commit to version control.
  * It loads an optional local configuration file (web/config.local.php,

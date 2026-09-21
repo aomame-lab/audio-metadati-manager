@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Manager</title>
+    <title>Audio Metadati Manager</title>
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
@@ -17,7 +17,7 @@
             <div class="container-fluid px-3 px-lg-4">
                 <a class="navbar-brand d-flex align-items-center gap-2" href="#">
                     <span class="brand-mark"><i class="bi bi-music-note-beamed"></i></span>
-                    <span class="brand-text">Audio Manager</span>
+                    <span class="brand-text">Audio Metadati Manager</span>
                 </a>
 
                 <div class="d-flex align-items-center gap-2 order-lg-3">
@@ -149,7 +149,7 @@
         </div>
 
         <footer class="app-footer">
-            <span><i class="bi bi-cpu"></i> Audio Manager &mdash; Python Core &middot; PHP API &middot; Bootstrap 5</span>
+            <span><i class="bi bi-cpu"></i> Audio Metadati Manager &mdash; Python Core &middot; PHP API &middot; Bootstrap 5</span>
             <span id="apiStatus" class="badge rounded-pill badge-soft"><span class="status-dot"></span> connecting...</span>
         </footer>
     </main>

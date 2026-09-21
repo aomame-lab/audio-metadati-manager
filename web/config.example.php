@@ -1,6 +1,6 @@
 <?php
 /**
- * Audio Manager - Example local configuration
+ * Audio Metadati Manager - Example local configuration
  *
  * Copy this file to web/config.local.php and set the path of your music
  * library:

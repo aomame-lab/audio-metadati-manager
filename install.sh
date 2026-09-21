@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Audio Manager - installation script
+# Audio MetadatiManager - installation script
 #
 # Sets up the Python virtual environment, installs the required packages
 # and prepares the local configuration.

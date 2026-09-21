@@ -1,6 +1,6 @@
 <?php
 /**
- * Audio Manager - Shared API bootstrap
+ * Audio MetadatiManager - Shared API bootstrap
  *
  * Common setup for every API endpoint:
  *  - JSON response headers

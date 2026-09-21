@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Audio Manager - startup script
+# Audio Metadati Manager - startup script
 #
 # Starts the PHP built-in web server with the web/ folder as document root.
 #
@@ -28,7 +28,7 @@ PORT="${PORT:-8000}"
 HOST="${HOST:-0.0.0.0}"
 
 echo "=============================================="
-echo " Audio Manager"
+echo " Audio Metadati Manager"
 echo "=============================================="
 echo " Server   : http://localhost:${PORT}"
 echo " LAN      : http://<your-ip>:${PORT}"

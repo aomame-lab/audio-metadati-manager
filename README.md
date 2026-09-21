@@ -74,8 +74,8 @@ No PHP extensions or Composer are required. The application uses only the PHP bu
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-user>/audio-manager.git
-cd audio-manager
+git clone https://github.com/<your-user>/audio-metadati-manager.git
+cd audio-metadati-manager
 ```
 
 ### 2. Install with the provided script

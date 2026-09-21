@@ -1,5 +1,5 @@
 /* ============================================================
-   Audio Manager — Frontend
+   Audio Metadati Manager — Frontend
    Vanilla JS + Fetch + Bootstrap 5
    ============================================================ */
 
@@ -64,7 +64,7 @@
     }
 
     /* ---------- Toast ---------- */
-    function toast(message, type = 'info', title = 'Audio Manager') {
+    function toast(message, type = 'info', title = 'Audio Metadati Manager') {
         const container = $('#toastContainer');
         const el = document.createElement('div');
         el.className = `toast ${type}`;
