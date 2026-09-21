@@ -5,7 +5,7 @@ services:
     ports:
       - "${PORT:-8000}:8000"
     volumes:
-      - ./music:/music
+      - ${MUSIC_PATH}:/music
     environment:
       - AUDIO_LIBRARY_OVERRIDE=/music
     restart: unless-stopped
