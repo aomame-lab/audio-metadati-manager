@@ -1,7 +1,7 @@
 services:
-  audio-manager:
+  audio-metadati-manager:
     build: .
-    container_name: audio-manager
+    container_name: audio-metadati-manager
     ports:
       - "${PORT:-8000}:8000"
     volumes:
