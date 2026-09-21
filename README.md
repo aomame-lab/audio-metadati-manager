@@ -1,6 +1,6 @@
-# Audio Manager
+# Audio Metadati Manager
 
-Audio Manager is a web-based application for managing your music library's metadata and album artwork. Python (via [mutagen](https://mutagen.readthedocs.io/)) performs all the audio operations, while PHP provides the web/API layer and a modern responsive interface built with HTML5, Bootstrap 5 and vanilla JavaScript.
+Audio Metadati Manager is a web-based application for managing your music library's metadata and album artwork. Python (via [mutagen](https://mutagen.readthedocs.io/)) performs all the audio operations, while PHP provides the web/API layer and a modern responsive interface built with HTML5, Bootstrap 5 and vanilla JavaScript.
 
 A command-line interface (CLI) for the same Python core is also included.
 
@@ -26,7 +26,13 @@ A command-line interface (CLI) for the same Python core is also included.
 
 ## Screenshots
 
-Screenshots can be added here in the future.
+### Main interface
+
+![alt text](screenshots/preview.jpg)
+
+### Bulk changes
+
+![alt text](screenshots/preview2.png)
 
 ## Architecture
 
@@ -325,3 +331,4 @@ Please open an issue or a pull request on GitHub for bugs, improvements and docu
 ## License
 
 This project does not currently include a LICENSE file. Before publishing, choose an appropriate open-source license and add it, or contact the author to clarify the licensing terms.
+
