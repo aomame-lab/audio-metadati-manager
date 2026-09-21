@@ -71,22 +71,40 @@ No PHP extensions or Composer are required. The application uses only the PHP bu
 
 ## Installation
 
-### 1. Clone the repository
+### Docker (Recommended for Home Servers)
 
-```bash
-git clone https://github.com/<your-user>/audio-metadati-manager.git
-cd audio-metadati-manager
-```
+The easiest way to run the application is using Docker Compose.
 
-### 2. Install with the provided script
+1. **Prepare your music folder**
+   Create a `music` directory in the project root (or map an existing one in `docker-compose.yml`):
+   ```bash
+   mkdir music
+   # Copy some music files into this folder for testing
+   ```
 
-```bash
-./install.sh
-```
+2. **Start the application**
+   ```bash
+   docker compose build
+   docker compose up -d
+   ```
 
-The script checks for PHP and Python, creates a virtual environment, installs `mutagen`, and prepares `web/config.local.php` from the example file.
+3. **Access the application**
+   Open your browser and go to: [http://localhost:8000](http://localhost:8000)
 
-### Manual installation
+4. **Configure the library**
+   By default, the Docker setup uses `/music` inside the container. You can change this by editing the `AUDIO_LIBRARY_OVERRIDE` environment variable in `docker-compose.yml`.
+
+5. **Common Docker Commands**
+   - View logs: `docker compose logs -f`
+   - Stop application: `docker compose down`
+   - Change host port: set `PORT=8080` in your environment or edit `docker-compose.yml`.
+
+### Permissions
+The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
+
+---
+
+### Manual Installation (Non-Docker)
 
 Create a Python virtual environment and install the dependency:
 

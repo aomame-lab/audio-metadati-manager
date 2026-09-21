@@ -1,0 +1,17 @@
+services:
+  audio-manager:
+    build: .
+    container_name: audio-manager
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./music:/music
+    environment:
+      - AUDIO_LIBRARY_OVERRIDE=/music
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "php", "-r", "if (@file_get_contents('http://localhost:8000/api/config.php') === false) exit(1);"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

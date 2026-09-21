@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+.DS_Store
+screenshot
+screenshots
+web/config.local.php
+music
+*.mp3
+*.flac
+*.m4a
+*.jpg
+*.jpeg
