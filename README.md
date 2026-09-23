@@ -1,6 +1,5 @@
-
 <p align="center">
-  <img src="web/audio-metadati-manager.svg" alt="Audio Metadata Manager" width="120">
+  <img src="web/audio-metadati-manager-logo.png" alt="Audio Metadata Manager" width="180">
 </p>
 
 # Audio Metadati Manager
