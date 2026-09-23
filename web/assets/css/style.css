@@ -16,7 +16,7 @@
     --gold-soft: rgba(200, 162, 76, 0.12);
     --gold-soft-strong: rgba(200, 162, 76, 0.22);
 
-    --text: #e9e7e0;
+    --text: #c8a24c;
     --text-muted: #9297a3;
     --text-faint: #636875;
 
@@ -33,13 +33,79 @@
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* ---------- Toolbar ---------- */
+.app-toolbar {
+    position: sticky;
+    top: 80px;
+    z-index: 100;
+    background: var(--bg);
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-soft);
+}
+
+@media (max-width: 991.98px) {
+    .app-toolbar {
+        top: 65px;
+    }
+}
+
 /* ---------- Base ---------- */
 body {
-    background: var(--bg);
-    color: var(--text);
+    background: var(--bg) !important;
+    color: var(--text) !important;
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     font-size: 0.9rem;
     min-height: 100vh;
+}
+
+/* Force dark theme on Bootstrap components */
+.bg-white, .bg-light {
+    background-color: var(--surface) !important;
+    color: var(--text) !important;
+}
+
+.table {
+    color: var(--text) !important;
+}
+
+.table-responsive {
+    background: var(--surface);
+}
+
+.form-control, .form-select {
+    background-color: var(--surface-2) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+}
+
+.form-control:focus, .form-select:focus {
+    background-color: var(--surface-2) !important;
+    color: var(--text) !important;
+}
+
+.modal-content {
+    background-color: var(--surface) !important;
+    color: var(--text) !important;
+}
+
+.offcanvas {
+    background-color: var(--surface) !important;
+    color: var(--text) !important;
+}
+
+.offcanvas-header, .offcanvas-body {
+    color: var(--text) !important;
+}
+
+/* Ensure all labels and muted text are visible */
+.form-label, .text-muted, .small {
+    color: var(--text-muted) !important;
+}
+
+/* Table Row Alternation */
+.table-tracks tbody tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.02);
 }
 
 ::selection {
@@ -62,19 +128,27 @@ body {
 .navbar { padding: 0.6rem 0; }
 
 .brand-mark {
-    width: 32px; height: 32px;
+    width: 50px; height: 50px;
     display: inline-flex; align-items: center; justify-content: center;
-    background: var(--gold-soft);
+   /* background: var(--gold-soft);
     border: 1px solid var(--gold-muted);
     color: var(--gold);
-    border-radius: 8px;
+    border-radius: 8px; */
     font-size: 1rem;
+}
+
+.brand-mark img {
+    width: 50px;
+    height: 50px;
+    object-fit: contain;
+    display: block;
 }
 
 .brand-text {
     font-weight: 600;
     letter-spacing: 0.02em;
     font-size: 1.05rem;
+    color: var(--gold);
 }
 
 .btn-icon {
@@ -215,7 +289,19 @@ body {
 }
 
 /* ---------- Table ---------- */
-.table-tracks { margin: 0; }
+.table-tracks {
+    margin: 0;
+    /* Dark background, no Bootstrap white defaults */
+    --bs-table-bg: var(--surface);
+    --bs-table-color: var(--text);
+    --bs-table-border-color: var(--border-soft);
+    --bs-table-hover-bg: var(--surface-2);
+    --bs-table-hover-color: var(--text);
+    --bs-table-striped-bg: var(--surface);
+    --bs-table-active-bg: var(--surface-2);
+    background-color: var(--surface);
+    color: var(--text);
+}
 
 .table-tracks thead th {
     font-size: 0.68rem;
@@ -237,6 +323,8 @@ body {
     border-top: 1px solid var(--border-soft);
     vertical-align: middle;
     white-space: nowrap;
+    background-color: var(--surface);
+    color: var(--text);
 }
 
 .table-tracks tbody tr.track-row {
@@ -316,7 +404,7 @@ body {
 .empty-state p { margin: 0; font-size: 0.85rem; }
 
 /* ---------- Details panel ---------- */
-.details-panel { position: sticky; top: 84px; }
+.details-panel { position: sticky; top: 115px; max-height: calc(100vh - 130px); overflow-y: auto; }
 
 .details-cover {
     position: relative;
@@ -498,18 +586,50 @@ body {
 
 /* ---------- Footer ---------- */
 .app-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-top: 2rem;
-    padding-top: 1rem;
+    margin-top: 20px;
     border-top: 1px solid var(--border-soft);
-    color: var(--text-faint);
-    font-size: 0.72rem;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    min-height: 50px;
+    padding: 8px 16px;
+}
+
+.footer-left {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.footer-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.footer-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.footer-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.footer-logo img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    display: block;
 }
 .app-footer .bi { color: var(--gold-muted); }
+.app-footer a { color: var(--gold-muted); text-decoration: none; }
+.app-footer a:hover { color: var(--gold); }
+.footer-logo { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
 #apiStatus .status-dot { background: var(--text-faint); }
 #apiStatus.ok .status-dot { background: var(--success); }
 #apiStatus.err .status-dot { background: var(--danger); }

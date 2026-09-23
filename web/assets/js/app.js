@@ -341,17 +341,9 @@
                     <label class="form-label" for="dAlbum-${esc(track.path)}">Album</label>
                     <input type="text" class="form-control" id="dAlbum-${esc(track.path)}" data-field="album" value="${esc(m.album)}" autocomplete="off">
                 </div>
-                <div class="col-12">
-                    <label class="form-label" for="dAlbumArtist-${esc(track.path)}">Album Artist</label>
-                    <input type="text" class="form-control" id="dAlbumArtist-${esc(track.path)}" data-field="album_artist" value="${esc(m.album_artist)}" autocomplete="off">
-                </div>
                 <div class="col-6">
                     <label class="form-label" for="dTrack-${esc(track.path)}">Track #</label>
                     <input type="number" class="form-control" id="dTrack-${esc(track.path)}" data-field="track" value="${esc(m.tracknumber)}" min="1" inputmode="numeric">
-                </div>
-                <div class="col-6">
-                    <label class="form-label" for="dTotal-${esc(track.path)}">Total tracks</label>
-                    <input type="number" class="form-control" id="dTotal-${esc(track.path)}" data-field="total" value="${esc(m.total)}" min="1" inputmode="numeric">
                 </div>
                 <div class="col-12">
                     <label class="form-label" for="dGenre-${esc(track.path)}">Genre</label>

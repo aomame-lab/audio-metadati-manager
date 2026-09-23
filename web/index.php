@@ -16,7 +16,7 @@
         <nav class="navbar navbar-expand-lg" aria-label="Main navigation">
             <div class="container-fluid px-3 px-lg-4">
                 <a class="navbar-brand d-flex align-items-center gap-2" href="#">
-                    <span class="brand-mark"><i class="bi bi-music-note-beamed"></i></span>
+                    <span class="brand-mark"><i> <img src="audio-metadati-manager-logo.svg"></i></span>
                     <span class="brand-text">Audio Metadati Manager</span>
                 </a>
 
@@ -43,9 +43,9 @@
     </header>
 
     <main class="app-main container-fluid px-3 px-lg-4 py-3 py-lg-4">
-
+ 
         <!-- ======= TOOLBAR ======= -->
-        <div class="d-flex flex-column flex-lg-row gap-2 gap-lg-3 align-items-lg-center mb-3">
+        <div class="app-toolbar d-flex flex-column flex-lg-row gap-2 gap-lg-3 align-items-lg-center mb-3">
 
             <div class="search-wrap flex-grow-1" style="max-width: 460px;">
                 <div class="input-group">
@@ -149,9 +149,28 @@
         </div>
 
         <footer class="app-footer">
-            <span><i class="bi bi-cpu"></i> Audio Metadati Manager &mdash; Python Core &middot; PHP API &middot; Bootstrap 5</span>
-            <span id="apiStatus" class="badge rounded-pill badge-soft"><span class="status-dot"></span> connecting...</span>
-        </footer>
+    <div class="footer-left">
+        <a href="https://github.com/aomame-lab/audio-metadati-manager"
+           target="_blank"
+           rel="noopener noreferrer"
+           aria-label="GitHub repository"
+           title="GitHub repository"
+           class="footer-logo">
+            <img src="aomame-lab-1.svg" alt="aomame-lab">
+        </a>
+    </div>
+
+    <div class="footer-center">
+        <span> V.1.0.1</span>
+    </div>
+
+    <div class="footer-right">
+        <span id="apiStatus" class="badge rounded-pill badge-soft">
+            <span class="status-dot"></span>
+            connecting...
+        </span>
+    </div>
+</footer>
     </main>
 
     <!-- ======= DETAILS OFF-CANVAS (mobile) ======= -->

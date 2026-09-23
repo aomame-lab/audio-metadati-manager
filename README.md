@@ -1,3 +1,8 @@
+
+<p align="center">
+  <img src="web/audio-metadati-manager.svg" alt="Audio Metadata Manager" width="120">
+</p>
+
 # Audio Metadati Manager
 
 Audio Metadati Manager is a web-based application for managing your music library's metadata and album artwork. Python (via [mutagen](https://mutagen.readthedocs.io/)) performs all the audio operations, while PHP provides the web/API layer and a modern responsive interface built with HTML5, Bootstrap 5 and vanilla JavaScript.
@@ -28,7 +33,7 @@ A command-line interface (CLI) for the same Python core is also included.
 
 ### Main interface
 
-![alt text](screenshots/preview.jpg)
+![alt text](screenshots/preview.png)
 
 ### Bulk changes
 
