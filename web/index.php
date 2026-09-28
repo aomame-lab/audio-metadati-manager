@@ -104,6 +104,7 @@
                                         <input type="checkbox" class="form-check-input" id="selectAllCheckbox" aria-label="Select all">
                                     </th>
                                     <th class="col-cover" scope="col"><span class="visually-hidden">Cover</span></th>
+                                    <th class="col-play" scope="col"><span class="visually-hidden">Play</span></th>
                                     <th class="col-num" scope="col">#</th>
                                     <th scope="col">Title</th>
                                     <th scope="col">Artist</th>
@@ -117,7 +118,7 @@
                             </thead>
                             <tbody id="tracksBody">
                                 <tr id="initialLoadingRow">
-                                    <td colspan="11" class="text-center py-5">
+                                    <td colspan="12" class="text-center py-5">
                                         <div class="spinner-border spinner-border-sm me-2" role="status"><span class="visually-hidden">Loading...</span></div>
                                         Loading library...
                                     </td>
@@ -148,6 +149,38 @@
             </div>
         </div>
 
+<!-- ======= AUDIO PLAYER ======= -->
+        <section class="audio-player-panel d-none" id="audioPlayerPanel" aria-label="Audio player">
+            <div class="audio-player-inner">
+                <div class="player-track-info">
+                    <div class="player-cover" aria-hidden="true">
+                        <div class="cover-placeholder"><i class="bi bi-music-note-beamed"></i></div>
+                    </div>
+                    <div class="player-meta">
+                        <div class="player-title" id="playerTitle">No track</div>
+                        <div class="player-artist" id="playerArtist">—</div>
+                    </div>
+                </div>
+                <div class="player-controls">
+                    <button type="button" class="btn btn-player" id="playerPrev" aria-label="Previous" title="Previous"><i class="bi bi-skip-backward"></i></button>
+                    <button type="button" class="btn btn-player btn-play" id="playerPlayPause" aria-label="Play" title="Play"><i class="bi bi-play-fill"></i></button>
+                    <button type="button" class="btn btn-player" id="playerNext" aria-label="Next" title="Next"><i class="bi bi-skip-forward"></i></button>
+                </div>
+                <div class="player-progress-wrap">
+                    <span class="player-time" id="playerCurrentTime">0:00</span>
+                    <div class="player-progress" id="playerProgress" role="slider" aria-label="Playback progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                        <div class="player-progress-fill" id="playerProgressFill"></div>
+                        <div class="player-progress-handle" id="playerProgressHandle"></div>
+                    </div>
+                    <span class="player-time" id="playerDuration">0:00</span>
+                </div>
+                <div class="player-volume-wrap">
+                    <button type="button" class="btn btn-volume" id="playerVolumeBtn" aria-label="Mute" title="Mute"><i class="bi bi-volume-up-fill"></i></button>
+                    <input type="range" class="player-volume-slider" id="playerVolume" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+                </div>
+            </div>
+        </section>
+
         <footer class="app-footer">
     <div class="footer-left">
         <a href="https://github.com/aomame-lab/audio-metadati-manager"
@@ -161,7 +194,7 @@
     </div>
 
     <div class="footer-center">
-        <span> V.1.0.1</span>
+        <span> V.1.2.0</span>
     </div>
 
     <div class="footer-right">
@@ -171,7 +204,7 @@
         </span>
     </div>
 </footer>
-    </main>
+</main>
 
     <!-- ======= DETAILS OFF-CANVAS (mobile) ======= -->
     <div class="offcanvas offcanvas-end" tabindex="-1" id="detailsOffcanvas" aria-labelledby="detailsOffcanvasLabel">

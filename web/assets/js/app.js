@@ -19,6 +19,16 @@
         busy: false,
     };
 
+    /* ---------- Audio Player State ---------- */
+    const playerState = {
+        audio: null,
+        currentIndex: -1,
+        playlist: [],
+        isPlaying: false,
+        volume: 1,
+        muted: false,
+    };
+
     let coverContext = null;   // { type:'single', path } | { type:'bulk', paths:[] }
     let coverChoice = null;    // path | '__remove__' | null
 
@@ -41,6 +51,216 @@
         const m = Math.floor(s / 60);
         const r = s % 60;
         return `${m}:${String(r).padStart(2, '0')}`;
+    }
+
+    function isBusy() {
+        return state.busy;
+    }
+
+    /* ---------- Audio Player ---------- */
+    function initPlayer() {
+        const audio = new Audio();
+        audio.preload = 'metadata';
+        audio.volume = playerState.volume;
+        playerState.audio = audio;
+
+        audio.addEventListener('loadedmetadata', () => {
+            updatePlayerDuration();
+            updatePlayerProgress();
+        });
+        audio.addEventListener('timeupdate', () => {
+            updatePlayerProgress();
+        });
+        audio.addEventListener('ended', () => {
+            playNext();
+        });
+        audio.addEventListener('play', () => {
+            playerState.isPlaying = true;
+            updatePlayPauseBtn();
+        });
+        audio.addEventListener('pause', () => {
+            playerState.isPlaying = false;
+            updatePlayPauseBtn();
+        });
+        audio.addEventListener('error', (e) => {
+            console.error('Audio error:', e);
+            toast('Playback error', 'error');
+            playerState.isPlaying = false;
+            updatePlayPauseBtn();
+        });
+
+        $('#playerPlayPause').addEventListener('click', togglePlayPause);
+        $('#playerNext').addEventListener('click', playNext);
+        $('#playerPrev').addEventListener('click', playPrev);
+
+        const progressEl = $('#playerProgress');
+        progressEl.addEventListener('click', (e) => seekProgress(e));
+        progressEl.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight') seekRelative(5);
+            else if (e.key === 'ArrowLeft') seekRelative(-5);
+        });
+
+        $('#playerVolume').addEventListener('input', (e) => setVolume(e.target.value));
+        $('#playerVolumeBtn').addEventListener('click', toggleMute);
+    }
+
+    function buildPlaylistFromVisible(startIndex = 0) {
+        const list = visibleTracks();
+        playerState.playlist = list.map(t => t.path);
+        playerState.currentIndex = Math.max(0, Math.min(startIndex, playerState.playlist.length - 1));
+    }
+
+    function loadTrack(index) {
+        if (index < 0 || index >= playerState.playlist.length) return;
+        const path = playerState.playlist[index];
+        const track = findTrack(path);
+        if (!track) return;
+
+        playerState.currentIndex = index;
+        const audio = playerState.audio;
+        const src = `api/audio.php?path=${encodeURIComponent(path)}`;
+        audio.src = src;
+        audio.load();
+
+        updatePlayerTrackInfo(track);
+        $('#audioPlayerPanel').classList.remove('d-none');
+    }
+
+    function playTrack(index) {
+        loadTrack(index);
+        playerState.audio.play().catch(() => {
+        });
+    }
+
+    function togglePlayPause() {
+        const audio = playerState.audio;
+        if (!audio.src) {
+            if (playerState.playlist.length === 0) {
+                buildPlaylistFromVisible(0);
+            }
+            if (playerState.playlist.length > 0) {
+                playTrack(playerState.currentIndex);
+            }
+            return;
+        }
+        if (playerState.isPlaying) {
+            audio.pause();
+        } else {
+            audio.play().catch(() => {});
+        }
+    }
+
+    function playNext() {
+        if (playerState.playlist.length === 0) return;
+        const next = (playerState.currentIndex + 1) % playerState.playlist.length;
+        playTrack(next);
+    }
+
+    function playPrev() {
+        if (playerState.playlist.length === 0) return;
+        const prev = (playerState.currentIndex - 1 + playerState.playlist.length) % playerState.playlist.length;
+        playTrack(prev);
+    }
+
+    function seekProgress(e) {
+        const audio = playerState.audio;
+        if (!audio.duration) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        audio.currentTime = pct * audio.duration;
+    }
+
+    function seekRelative(seconds) {
+        const audio = playerState.audio;
+        if (!audio.duration) return;
+        audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+    }
+
+    function setVolume(value) {
+        const audio = playerState.audio;
+        const vol = Math.max(0, Math.min(1, parseFloat(value)));
+        playerState.volume = vol;
+        playerState.muted = vol === 0;
+        audio.volume = vol;
+        updateVolumeUI();
+    }
+
+    function toggleMute() {
+        if (playerState.muted || playerState.volume === 0) {
+            setVolume(playerState.volume || 1);
+        } else {
+            setVolume(0);
+        }
+    }
+
+    function updatePlayerTrackInfo(track) {
+        const m = mergedTrack(track);
+        $('#playerTitle').textContent = m.title || track.filename;
+        $('#playerArtist').textContent = m.artist || '—';
+
+        const coverUrl = effectiveCoverUrl(track);
+        const coverEl = $('#audioPlayerPanel .player-cover');
+        if (coverUrl) {
+            coverEl.innerHTML = `<img src="${esc(coverUrl)}" alt="" loading="lazy">`;
+        } else {
+            coverEl.innerHTML = '<div class="cover-placeholder"><i class="bi bi-music-note-beamed"></i></div>';
+        }
+    }
+
+    function updatePlayerProgress() {
+        const audio = playerState.audio;
+        if (!audio.duration) return;
+        const pct = (audio.currentTime / audio.duration) * 100;
+        $('#playerProgressFill').style.width = `${pct}%`;
+        $('#playerProgressHandle').style.left = `${pct}%`;
+        $('#playerProgress').setAttribute('aria-valuenow', Math.round(pct));
+        $('#playerCurrentTime').textContent = formatDuration(audio.currentTime);
+    }
+
+    function updatePlayerDuration() {
+        const audio = playerState.audio;
+        $('#playerDuration').textContent = formatDuration(audio.duration);
+    }
+
+    function updatePlayPauseBtn() {
+        const btn = $('#playerPlayPause');
+        const icon = btn.querySelector('i');
+        if (playerState.isPlaying) {
+            icon.className = 'bi bi-pause-fill';
+            btn.setAttribute('aria-label', 'Pause');
+            btn.title = 'Pause';
+        } else {
+            icon.className = 'bi bi-play-fill';
+            btn.setAttribute('aria-label', 'Play');
+            btn.title = 'Play';
+        }
+        updateRowPlayButtons();
+    }
+
+    function updateVolumeUI() {
+        const vol = playerState.muted ? 0 : playerState.volume;
+        $('#playerVolume').value = vol;
+        const btn = $('#playerVolumeBtn');
+        const icon = btn.querySelector('i');
+        if (vol === 0) {
+            icon.className = 'bi bi-volume-mute-fill';
+            btn.setAttribute('aria-label', 'Unmute');
+        } else if (vol < 0.5) {
+            icon.className = 'bi bi-volume-down-fill';
+            btn.setAttribute('aria-label', 'Mute');
+        } else {
+            icon.className = 'bi bi-volume-up-fill';
+            btn.setAttribute('aria-label', 'Mute');
+        }
+    }
+
+    function playTrackByPath(path) {
+        const list = visibleTracks();
+        const idx = list.findIndex(t => t.path === path);
+        if (idx >= 0) {
+            buildPlaylistFromVisible(idx);
+            playTrack(idx);
+        }
     }
 
     function isBusy() {
@@ -215,7 +435,7 @@
         const list = visibleTracks();
         if (state.tracks.length === 0) {
             tbody.innerHTML = `
-                <tr><td colspan="11" class="text-center py-5">
+                <tr><td colspan="12" class="text-center py-5">
                     <div class="empty-state"><i class="bi bi-inbox"></i><p>No tracks found. Enter the library path and press SCAN.</p></div>
                 </td></tr>`;
             updateCounts();
@@ -223,7 +443,7 @@
         }
         if (list.length === 0) {
             tbody.innerHTML = `
-                <tr><td colspan="11" class="text-center py-5">
+                <tr><td colspan="12" class="text-center py-5">
                     <div class="empty-state"><i class="bi bi-search"></i><p>No results for the current search or filters.</p></div>
                 </td></tr>`;
             updateCounts();
@@ -238,6 +458,7 @@
             const isSelected = state.selected.has(track.path);
             const isCurrent = state.currentPath === track.path;
             const isDirty = state.pending.has(track.path);
+            const isPlaying = playerState.isPlaying && playerState.audio && playerState.audio.src && playerState.audio.src.includes(encodeURIComponent(track.path));
             const cls = [
                 'track-row',
                 isSelected ? 'selected' : '',
@@ -250,6 +471,11 @@
                         <input type="checkbox" class="form-check-input select-track" data-path="${esc(track.path)}" aria-label="Select ${esc(m.title || track.filename)}" ${isSelected ? 'checked' : ''}>
                     </td>
                     <td class="col-cover">${coverThumb(track)}</td>
+                    <td class="col-play">
+                        <button type="button" class="btn-play-row" data-path="${esc(track.path)}" aria-label="${isPlaying ? 'Pause' : 'Play'} ${esc(m.title || track.filename)}" title="${isPlaying ? 'Pause' : 'Play'}">
+                            <i class="bi ${isPlaying ? 'bi-pause-fill' : 'bi-play-fill'}"></i>
+                        </button>
+                    </td>
                     <td class="col-num text-muted">${m.tracknumber || ''}</td>
                     <td><span class="track-title d-inline-block">${esc(m.title || track.filename)}</span></td>
                     <td><span class="track-meta d-inline-block">${esc(m.artist || '—')}</span></td>
@@ -267,6 +493,28 @@
         headerCheck.indeterminate = selectedVisible > 0 && selectedVisible < list.length;
 
         updateCounts();
+    }
+
+    function updateRowPlayButtons() {
+        const playingPath = playerState.isPlaying && playerState.audio && playerState.audio.src
+            ? playerState.audio.src.split('path=')[1]?.split('&')[0]
+            : null;
+        const decodedPlayingPath = playingPath ? decodeURIComponent(playingPath) : null;
+
+        document.querySelectorAll('.btn-play-row').forEach((btn) => {
+            const path = btn.dataset.path;
+            const isPlaying = playerState.isPlaying && path === decodedPlayingPath;
+            const icon = btn.querySelector('i');
+            if (isPlaying) {
+                icon.className = 'bi bi-pause-fill';
+                btn.setAttribute('aria-label', `Pause ${btn.title.replace('Pause ', '').replace('Play ', '')}`);
+                btn.title = 'Pause';
+            } else {
+                icon.className = 'bi bi-play-fill';
+                btn.setAttribute('aria-label', `Play ${btn.title.replace('Pause ', '').replace('Play ', '')}`);
+                btn.title = 'Play';
+            }
+        });
     }
 
     /* ---------- Selection ---------- */
@@ -548,7 +796,7 @@
         const path = state.libraryPath;
         setBusy(true, 'Loading library...', path || '');
         const tbody = $('#tracksBody');
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" class="text-center py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</td></tr>';
         try {
             const res = await api('api/tracks.php?path=' + encodeURIComponent(path));
             state.tracks = res.tracks || [];
@@ -583,7 +831,7 @@
         if (state.libraryPath) {
             await loadLibrary();
         } else {
-            $('#tracksBody').innerHTML = '<tr><td colspan="11" class="text-center py-5"><div class="empty-state"><i class="bi bi-folder2-open"></i><p>Enter the library path and press SCAN.</p></div></td></tr>';
+            $('#tracksBody').innerHTML = '<tr><td colspan="12" class="text-center py-5"><div class="empty-state"><i class="bi bi-folder2-open"></i><p>Enter the library path and press SCAN.</p></div></td></tr>';
         }
     }
 
@@ -821,6 +1069,13 @@
         $('#deselectAllBtn').addEventListener('click', deselectAll);
 
         $('#tracksBody').addEventListener('click', (e) => {
+            const playBtn = e.target.closest('.btn-play-row');
+            if (playBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                playTrackByPath(playBtn.dataset.path);
+                return;
+            }
             const row = e.target.closest('.track-row');
             if (!row) return;
             const path = row.dataset.path;
@@ -866,6 +1121,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         wireEvents();
+        initPlayer();
         init();
     });
 })();

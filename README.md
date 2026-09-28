@@ -8,6 +8,18 @@ Audio Metadati Manager is a web-based application for managing your music librar
 
 A command-line interface (CLI) for the same Python core is also included.
 
+## Version
+
+**1.2.0** — Added built-in audio player with play/pause, seek, progress bar, time display, volume control; always-visible play button per track; single-track playback.
+
+## Changelog
+
+### 1.2.0
+- **Audio player**: global HTML5 player with play/pause, next/previous, seek bar, current time/duration, volume/mute
+- **Per-track play button**: dedicated always-visible column with Play/Pause button for each track
+- **Single-track playback**: only one track plays at a time; starting a new track stops the previous one
+- **Range request support**: audio endpoint serves MP3, FLAC, M4A with HTTP Range for seeking
+
 ## Features
 
 - Web-based audio metadata management
@@ -17,6 +29,7 @@ A command-line interface (CLI) for the same Python core is also included.
 - Bulk editing of multiple tracks at once
 - Search across title, artist, album, genre and filename
 - Filter by format (MP3/FLAC/M4A) and status (unsaved/saved)
+- **Built-in audio player**: play tracks directly from the library with a global HTML5 player (play/pause, next/previous, seek/progress bar, current time/duration, volume/mute); per-track Play/Pause button; single-track playback
 - Album cover management:
   - JPEG/JPG files in the same folder as the audio are detected automatically (case-insensitive)
   - Choose between the available images
