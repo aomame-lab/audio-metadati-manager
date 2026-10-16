@@ -17,6 +17,10 @@
         filterFormat: 'all',
         filterStatus: 'all',
         busy: false,
+        viewMode: 'artists',        // 'artists' (Artist->Album->Track) | 'tracks' (flat list)
+        expandedArtists: new Set(), // artist keys currently expanded
+        expandedAlbums: new Set(),  // album keys currently expanded
+        totals: { artists: 0, albums: 0 }, // computed on the WHOLE library, not on filters
     };
 
     /* ---------- Audio Player State ---------- */
@@ -414,9 +418,506 @@
     }
 
     function updateCounts() {
-        $('#trackCount').textContent = state.tracks.length;
-        $('#resultInfo').textContent = `${visibleTracks().length} of ${state.tracks.length} results`;
+        const list = visibleTracks();
+        const label = `${list.length} of ${state.tracks.length} results`;
+        $('#resultInfo').textContent = label;
+        const treeInfo = $('#treeResultInfo');
+        if (treeInfo) treeInfo.textContent = label;
         $('#libraryInfo').textContent = state.libraryPath ? `Library: ${state.libraryPath}` : '';
+
+        // Riepilogo unico: vive nel badge #trackCountBadge dell'header, non in una
+        // seconda area separata. I conteggi artisti/albumi sono sempre quelli
+        // dell'INTERA libreria (state.totals), i selezionati e le modifiche
+        // pendenti dipendono dallo stato corrente.
+        const stats = $('#libraryStats');
+        if (!stats) return;
+        if (state.tracks.length === 0) {
+            stats.textContent = 'No library';
+            return;
+        }
+        const nA = state.totals.artists;
+        const nB = state.totals.albums;
+        const nT = state.tracks.length;
+        const parts = [
+            `<span class="stat-strong">${nT}</span> track${nT === 1 ? '' : 's'}`,
+            `<span class="stat-sep">·</span><span class="stat-strong">${nA}</span> artist${nA === 1 ? '' : 'i'}`,
+            `<span class="stat-sep">·</span><span class="stat-strong">${nB}</span> album${nB === 1 ? '' : 'i'}`,
+        ];
+        if (state.selected.size > 0) {
+            parts.push(`<span class="stat-sep">·</span><span class="stat-strong">${state.selected.size}</span> sel.`);
+        }
+        if (state.pending.size > 0) {
+            parts.push(`<span class="stat-sep">·</span><span class="stat-dirty">${state.pending.size} unsaved</span>`);
+        }
+        stats.innerHTML = parts.join(' ');
+    }
+
+    /* ============================================================
+       Library hierarchy — Artist -> Album -> Track
+       Built once from the in-memory track list (no extra HTTP call:
+       api/tracks.php already returns every metadata field at once).
+       Children are rendered lazily: an artist only materialises its albums
+       when expanded, and an album only its track table when expanded.
+       ============================================================ */
+    const UNKNOWN_ARTIST = 'Unknown artist';
+    const UNKNOWN_ALBUM = 'Unknown album';
+    const UNKNOWN_KEY = '__unknown__';
+    let libraryModel = [];        // [{ key, name, unknown, albums:[...], tracks:[...] }]
+
+    // Normalisation used for grouping AND for search: accent/case insensitive.
+    function foldKey(value) {
+        return String(value ?? '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    // Display name for the artist of a track: album_artist wins over artist.
+    function artistNameOf(track) {
+        const m = mergedTrack(track);
+        return (m.album_artist || '').trim() || (m.artist || '').trim();
+    }
+
+    function albumNameOf(track) {
+        return (mergedTrack(track).album || '').trim();
+    }
+
+    function trackNoOf(track) {
+        const n = parseInt(String(track.tracknumber || '').split('/')[0], 10);
+        return Number.isFinite(n) && n > 0 ? n : Number.MAX_SAFE_INTEGER;
+    }
+
+    function byName(a, b) {
+        return String(a).localeCompare(String(b), undefined, { sensitivity: 'base', numeric: true });
+    }
+
+    function sortTracks(list) {
+        return list.slice().sort((a, b) => {
+            const na = trackNoOf(a);
+            const nb = trackNoOf(b);
+            if (na !== nb) return na - nb;
+            return byName(a.filename || '', b.filename || '');
+        });
+    }
+
+    // Composite album key. The artist length is prefixed so the join is unambiguous
+// (artist "a b" + album "c" cannot collide with artist "a" + album "b c"), and the
+// result is plain printable text: control characters are not valid in HTML
+// attributes (a NUL would be turned into U+FFFD and break every lookup).
+function albumKeyOf(artistKey, albumName) {
+    const a = String(artistKey || '');
+    return a.length + ':' + a + ':' + (foldKey(albumName) || UNKNOWN_KEY + 'album');
+}
+
+function buildLibraryModel() {
+        const artists = new Map();
+        const seen = new Set();          // guards against the same file appearing twice
+
+        for (const track of visibleTracks()) {
+            if (seen.has(track.path)) continue;
+            seen.add(track.path);
+
+            const artistName = artistNameOf(track);
+            const artistKey = foldKey(artistName) || UNKNOWN_KEY + 'artist';
+            let artist = artists.get(artistKey);
+            if (!artist) {
+                artist = { key: artistKey, name: artistName || UNKNOWN_ARTIST, unknown: !artistName, albums: new Map(), tracks: [] };
+                artists.set(artistKey, artist);
+            }
+            artist.tracks.push(track);
+
+            const albumName = albumNameOf(track);
+            const albumKey = albumKeyOf(artistKey, albumName);
+            let album = artist.albums.get(albumKey);
+            if (!album) {
+                album = { key: albumKey, name: albumName || UNKNOWN_ALBUM, unknown: !albumName, year: '', tracks: [] };
+                artist.albums.set(albumKey, album);
+            }
+            album.tracks.push(track);
+
+            const year = String(track.year || '').trim();
+            if (!album.year && year) album.year = year;
+        }
+
+        const list = [...artists.values()].map((artist) => {
+            const albums = [...artist.albums.values()].map((album) => {
+                const tracks = sortTracks(album.tracks);
+                // Representative cover: first track of the album that exposes one.
+                const coverTrack = tracks.find((t) => effectiveCoverUrl(t)) || null;
+                return { ...album, tracks, coverTrack, trackCount: tracks.length };
+            });
+            albums.sort((a, b) => {
+                const ya = parseInt(a.year, 10) || 0;
+                const yb = parseInt(b.year, 10) || 0;
+                if (ya && yb && ya !== yb) return ya - yb;      // chronological
+                if (ya && !yb) return -1;                       // dated albums first
+                if (!ya && yb) return 1;
+                return byName(a.name, b.name);
+            });
+            artist.tracks = sortTracks(artist.tracks);
+            // Representative cover for the artist row: first album cover available.
+            artist.coverTrack = albums.find((a) => a.coverTrack)?.coverTrack || null;
+            return {
+                key: artist.key,
+                name: artist.name,
+                unknown: artist.unknown,
+                albums,
+                tracks: artist.tracks,
+                coverTrack: artist.coverTrack,
+                albumCount: albums.length,
+                trackCount: artist.tracks.length,
+            };
+        });
+
+        list.sort((a, b) => {
+            if (a.unknown !== b.unknown) return a.unknown ? 1 : -1;   // "Unknown artist" last
+            return byName(a.name, b.name);
+        });
+        // Stable DOM ids: derived from the position, never from the metadata, because a
+        // key may contain characters (':', quotes, spaces) that are illegal in a CSS
+        // selector. Keys stay in data-* attributes, which are always safe.
+        let albumSeq = 0;
+        list.forEach((artist, i) => {
+            artist.domId = 'ar-' + i;
+            artist.albums.forEach((album) => { album.domId = 'al-' + (albumSeq++); });
+        });
+        return list;
+    }
+
+    /* ---------- Markup helpers (all values escaped) ---------- */
+    function coverImgHtml(url, alt, cls) {
+        if (!url) return `<i class="bi bi-music-note-beamed"></i>`;
+        return `<img src="${esc(url)}" alt="${esc(alt || '')}" loading="lazy">`;
+    }
+
+    function highlight(text, query) {
+        const safe = esc(text);
+        const q = foldKey(query).trim();
+        if (!q) return safe;
+        // Escape first, then match on the escaped string using a plain index scan
+        // on the folded form; matched substrings are wrapped.
+        const folded = String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const idx = folded.indexOf(q);
+        if (idx < 0) return safe;
+        // Map folded index back to the original string (1:1 for the chars we keep).
+        const before = String(text ?? '').slice(0, idx);
+        const matchLen = String(text ?? '').slice(idx).normalize('NFD').replace(/[\u0300-\u036f]/g, '').length;
+        const match = String(text ?? '').substr(idx, matchLen);
+        return `${esc(before)}<mark class="tv-mark">${esc(match)}</mark>${esc(String(text ?? '').slice(idx + matchLen))}`;
+    }
+
+    function artistRowHtml(artist) {
+        const cover = artist.coverTrack ? effectiveCoverUrl(artist.coverTrack) : null;
+        const selN = artist.tracks.filter((t) => state.selected.has(t.path)).length;
+        const cls = ['artist-node'];
+        if (state.expandedArtists.has(artist.key)) cls.push('expanded');
+        return `
+            <div class="${cls.join(' ')}" data-artist-node="${esc(artist.key)}">
+                <div class="artist-row" role="button" tabindex="0"
+                     data-action="toggle-artist" data-artist="${esc(artist.key)}"
+                     aria-expanded="${state.expandedArtists.has(artist.key)}"
+                     aria-controls="${esc(artist.domId)}">
+                    <span class="artist-chevron" aria-hidden="true"><i class="bi bi-chevron-right"></i></span>
+                    <span class="artist-cover" aria-hidden="true">${coverImgHtml(cover, '')}</span>
+                    <span class="artist-info">
+                        <span class="artist-name ${artist.unknown ? 'is-unknown' : ''}" title="${esc(artist.name)}">${highlight(artist.name, state.searchQuery)}</span>
+                        <span class="artist-meta">${artist.albumCount} album${artist.albumCount === 1 ? '' : 's'} · ${artist.trackCount} track${artist.trackCount === 1 ? '' : 's'}</span>
+                    </span>
+                    <span class="artist-stats" data-artist-stats="${esc(artist.key)}">${selN}/${artist.trackCount}</span>
+                    <input type="checkbox" class="form-check-input artist-check" data-artist="${esc(artist.key)}"
+                           aria-label="Select all tracks by ${esc(artist.name)}"
+                           ${selN === artist.tracks.length && artist.trackCount > 0 ? 'checked' : ''}
+                           ${selN > 0 && selN < artist.tracks.length ? 'data-indeterminate="1"' : ''}>
+                </div>
+                <div class="collapse artist-body" id="${esc(artist.domId)}" data-children-of="artist" data-artist="${esc(artist.key)}">
+                    <div class="artist-body-grid"></div>
+                </div>
+            </div>`;
+    }
+
+    function albumCardHtml(album) {
+        const cover = album.coverTrack ? effectiveCoverUrl(album.coverTrack) : null;
+        const selN = album.tracks.filter((t) => state.selected.has(t.path)).length;
+        const expanded = state.expandedAlbums.has(album.key);
+        const year = album.year ? esc(album.year) : '<span class="text-faint">—</span>';
+        const firstTrack = album.tracks[0];
+        return `
+            <div class="album-card ${selN ? 'has-selection' : ''}" data-album-card="${esc(album.key)}">
+                <button type="button" class="album-cover-btn"
+                        data-action="toggle-album" data-album="${esc(album.key)}"
+                        aria-expanded="${expanded}" aria-controls="${esc(album.domId)}"
+                        title="${esc(album.name)} — show tracks">
+                    <span class="album-cover" aria-hidden="true">${coverImgHtml(cover, '')}</span>
+                    <span class="album-play" aria-hidden="true"><i class="bi ${expanded ? 'bi-chevron-up' : 'bi-chevron-down'}"></i></span>
+                    ${selN ? `<span class="album-cover-badge">${selN}</span>` : ''}
+                </button>
+                <div class="album-info">
+                    <span class="album-title ${album.unknown ? 'is-unknown' : ''}" title="${esc(album.name)}">${highlight(album.name, state.searchQuery)}</span>
+                    <span class="album-sub">
+                        <span class="album-year">${year}</span>
+                        <input type="checkbox" class="form-check-input album-check" data-album="${esc(album.key)}"
+                               aria-label="Select all tracks of ${esc(album.name)}"
+                               ${selN === album.trackCount && album.trackCount > 0 ? 'checked' : ''}
+                               ${selN > 0 && selN < album.trackCount ? 'data-indeterminate="1"' : ''}>
+                        <span class="album-count">${album.trackCount}</span>
+                    </span>
+                </div>
+            </div>`;
+    }
+
+    // Blocco tracce: contenitore DEDICATO, fratello della card album nella griglia
+    // dell'artista (non dentro la card, che e' larga ~148px, e non dentro
+    // .artist-body-grid/.album-list). Espansione governata dall'attributo `hidden`,
+    // quindi indipendente dal collapse Bootstrap dell'artista e degli altri album.
+    function albumTracksHtml(album) {
+        const expanded = state.expandedAlbums.has(album.key);
+        return `
+            <div class="album-tracks" id="${esc(album.domId)}" data-children-of="album" data-album="${esc(album.key)}"${expanded ? '' : ' hidden'}>
+                <div class="album-tracks-head">
+                    <i class="bi bi-music-note-list" aria-hidden="true"></i>
+                    <span class="album-tracks-name ${album.unknown ? 'is-unknown' : ''}">${highlight(album.name, state.searchQuery)}</span>
+                    <span class="album-tracks-count">${album.trackCount} track${album.trackCount === 1 ? '' : 's'}</span>
+                </div>
+                <div class="album-tracks-body"></div>
+            </div>`;
+    }
+
+    function trackRowHtml(track) {
+        const m = mergedTrack(track);
+        const dirty = state.pending.has(track.path);
+        const selected = state.selected.has(track.path);
+        const title = m.title || track.filename;
+        const num = trackNoOf(track) !== Number.MAX_SAFE_INTEGER ? String(trackNoOf(track)) : '';
+        const fmt = String(track.extension || '').replace('.', '').toUpperCase();
+        return `
+            <tr class="${dirty ? 'tv-dirty' : ''} ${selected ? 'tv-selected' : ''}" data-track-row="${esc(track.path)}">
+                <td class="tv-check-cell">
+                    <input type="checkbox" class="form-check-input tv-check" data-path="${esc(track.path)}"
+                           aria-label="Select ${esc(title)}" ${selected ? 'checked' : ''}>
+                </td>
+                <td class="tv-num">${esc(num)}</td>
+                <td class="tv-title ${m.title ? '' : 'is-unknown'}">${highlight(title, state.searchQuery)}</td>
+                <td class="tv-dur">${formatDuration(track.duration)}</td>
+                <td class="tv-fmt">${fmt ? `<span class="tv-fmt-badge">${esc(fmt)}</span>` : ''}</td>
+                <td class="tv-status">
+                    <span class="tv-dot ${dirty ? 'is-dirty' : ''}" aria-hidden="true"></span>
+                    <span class="tv-status-label">${dirty ? 'UNSAVED' : 'SAVED'}</span>
+                </td>
+                <td class="tv-actions">
+                    <button type="button" class="tv-edit-btn" data-action="edit-track" data-path="${esc(track.path)}"
+                            aria-label="Edit ${esc(title)}" title="Edit metadata">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </td>
+            </tr>`;
+    }
+
+    function trackTableHtml(album) {
+        return `
+            <table class="track-list-compact">
+                <caption class="visually-hidden">Tracks of ${esc(album.name)}</caption>
+                <tbody>${album.tracks.map(trackRowHtml).join('')}</tbody>
+            </table>`;
+    }
+
+    /* ---------- Lazy materialisation of children ---------- */
+    function findArtist(key) {
+        return libraryModel.find((a) => a.key === key) || null;
+    }
+
+    function findAlbum(key) {
+        for (const artist of libraryModel) {
+            const hit = artist.albums.find((a) => a.key === key);
+            if (hit) return hit;
+        }
+        return null;
+    }
+
+    function ensureArtistChildren(el) {
+        if (el.dataset.filled === '1') return;
+        const artist = findArtist(el.dataset.artist);
+        if (!artist) return;
+        el.innerHTML = `<div class="artist-body-grid">${
+            artist.albums.map((a) => albumCardHtml(a) + albumTracksHtml(a)).join('')
+        }</div>`;
+        el.dataset.filled = '1';
+        syncIndeterminate(el);
+    }
+
+    function ensureAlbumTracks(el) {
+        if (el.dataset.filled === '1') return;
+        const album = findAlbum(el.dataset.album);
+        if (!album) return;
+        const body = el.querySelector('.album-tracks-body');
+        if (body) body.innerHTML = trackTableHtml(album);
+        el.dataset.filled = '1';
+        syncIndeterminate(el);
+    }
+
+    // Mostra/nasconde il blocco tracce di un album. L'attributo `hidden` e' lo stato
+    // visivo: nonDipende dal collapse dell'artista ne' da quello degli altri album.
+    function setAlbumTracksVisible(el, visible) {
+        if (!el) return;
+        el.hidden = !visible;
+        const btn = document.querySelector(`[data-action="toggle-album"][data-album="${cssEscape(el.dataset.album)}"]`);
+        if (btn) btn.setAttribute('aria-expanded', String(visible));
+        const icon = btn ? btn.querySelector('.album-play i') : null;
+        if (icon) icon.className = 'bi ' + (visible ? 'bi-chevron-up' : 'bi-chevron-down');
+    }
+
+    // Reflect "partially selected" on group checkboxes after children are built.
+    function syncIndeterminate(root) {
+        root.querySelectorAll('input[data-indeterminate="1"]').forEach((cb) => { cb.indeterminate = true; });
+    }
+
+    /* ---------- Full render of the hierarchy ---------- */
+    function renderArtistTree() {
+        const host = $('#artistTree');
+        if (!host) return;
+        libraryModel = buildLibraryModel();
+
+        if (state.tracks.length === 0) {
+            host.innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p>No tracks found. Enter the library path and press SCAN.</p></div>`;
+            return;
+        }
+        if (libraryModel.length === 0) {
+            host.innerHTML = `<div class="empty-state"><i class="bi bi-search"></i><p>No results for the current search or filters.</p></div>`;
+            return;
+        }
+
+        host.innerHTML = libraryModel.map(artistRowHtml).join('');
+        // Restore (or force, when searching) the expansion state.
+        if (state.searchQuery) {
+            libraryModel.forEach((a) => state.expandedArtists.add(a.key));
+            libraryModel.forEach((a) => a.albums.forEach((al) => state.expandedAlbums.add(al.key)));
+        }
+        libraryModel.forEach((artist) => {
+            if (!state.expandedArtists.has(artist.key)) return;
+            const el = host.querySelector(`[data-children-of="artist"][data-artist="${cssEscape(artist.key)}"]`);
+            if (!el) return;
+            ensureArtistChildren(el);
+            bootstrap.Collapse.getOrCreateInstance(el).show();
+            // Ripristina solo gli album che erano aperti: lo stato vive in
+            // state.expandedAlbums e non viene toccato dal collapse dell'artista.
+            artist.albums.forEach((album) => {
+                if (!state.expandedAlbums.has(album.key)) return;
+                const alEl = el.querySelector(`[data-children-of="album"][data-album="${cssEscape(album.key)}"]`);
+                if (!alEl) return;
+                ensureAlbumTracks(alEl);
+                setAlbumTracksVisible(alEl, true);
+            });
+        });
+        syncIndeterminate(host);
+    }
+
+    // Escape for use inside a QUOTED attribute selector value.
+// Deliberately not CSS.escape: that escapes characters (spaces) that are
+// perfectly legal inside quotes and would break the lookup.
+    function cssEscape(value) {
+        return String(value).replace(/["\\]/g, '\\$&');
+    }
+
+
+
+    /* ---------- Targeted updates (no full rebuild while typing) ---------- */
+    function patchTrackNode(path) {
+        const track = findTrack(path);
+        if (!track) return;
+        document.querySelectorAll(`[data-track-row="${cssEscape(path)}"]`).forEach((row) => {
+            const dirty = state.pending.has(path);
+            const selected = state.selected.has(path);
+            row.classList.toggle('tv-dirty', dirty);
+            row.classList.toggle('tv-selected', selected);
+            const dot = row.querySelector('.tv-dot');
+            const label = row.querySelector('.tv-status-label');
+            if (dot) dot.classList.toggle('is-dirty', dirty);
+            if (label) label.textContent = dirty ? 'UNSAVED' : 'SAVED';
+            const cb = row.querySelector('.tv-check');
+            if (cb) cb.checked = selected;
+        });
+    }
+
+    function syncSelectionUi() {
+        // Track checkboxes
+        document.querySelectorAll('.tv-check').forEach((cb) => {
+            cb.checked = state.selected.has(cb.dataset.path);
+        });
+        // Group checkboxes + counters
+        const recount = (nodes, set) => {
+            nodes.forEach((cb) => {
+                const key = cb.dataset[set];
+                const group = set === 'artist'
+                    ? (findArtist(key)?.tracks || [])
+                    : (findAlbum(key)?.tracks || []);
+                const n = group.filter((t) => state.selected.has(t.path)).length;
+                cb.checked = group.length > 0 && n === group.length;
+                cb.indeterminate = n > 0 && n < group.length;
+                const counter = document.querySelector(
+                    set === 'artist' ? `[data-artist-stats="${cssEscape(key)}"]` : `[data-album-card="${cssEscape(key)}"] .album-cover-badge`
+                );
+                if (set === 'artist') {
+                    if (counter) counter.textContent = `${n}/${group.length}`;
+                } else if (counter) {
+                    counter.textContent = String(n);
+                    counter.style.display = n ? '' : 'none';
+                }
+                if (set === 'album') {
+                    const card = document.querySelector(`[data-album-card="${cssEscape(key)}"]`);
+                    if (card) card.classList.toggle('has-selection', n > 0);
+                }
+            });
+        };
+        recount(document.querySelectorAll('.artist-check'), 'artist');
+        recount(document.querySelectorAll('.album-check'), 'album');
+        // Flat list header checkbox
+        const list = visibleTracks();
+        const selVisible = list.filter((t) => state.selected.has(t.path)).length;
+        const header = $('#selectAllCheckbox');
+        if (header) {
+            header.checked = list.length > 0 && selVisible === list.length;
+            header.indeterminate = selVisible > 0 && selVisible < list.length;
+        }
+    }
+
+    /* ---------- View switching ---------- */
+    // Artists/albums totals over the whole library (filters must not change the header).
+    function computeTotals() {
+        const artists = new Set();
+        const albums = new Set();
+for (const t of state.tracks) {
+            const a = foldKey(artistNameOf(t));
+            artists.add(a || '');
+            // An album group always exists (the tree falls back to "Unknown album"),
+            // so it must be counted here too or the header would disagree with the tree.
+            albums.add(albumKeyOf(a, albumNameOf(t)));
+        }
+        state.totals = { artists: artists.size, albums: albums.size };
+    }
+
+    // Single entry point: renders whichever view is active.
+    function renderView() {
+        syncViewUI();
+        if (state.viewMode === 'artists') {
+            renderArtistTree();
+        } else {
+            libraryModel = buildLibraryModel();
+            renderTrackTable();
+        }
+        updateCounts();
+    }
+
+    function syncViewUI() {
+        const isArtists = state.viewMode === 'artists';
+        const aBtn = $('#viewArtistsBtn');
+        const tBtn = $('#viewTracksBtn');
+        if (aBtn) { aBtn.classList.toggle('active', isArtists); aBtn.setAttribute('aria-pressed', String(isArtists)); }
+        if (tBtn) { tBtn.classList.toggle('active', !isArtists); tBtn.setAttribute('aria-pressed', String(!isArtists)); }
+        const aPanel = $('#artistViewPanel');
+        const tPanel = $('#trackViewPanel');
+        if (aPanel) aPanel.hidden = !isArtists;
+        if (tPanel) tPanel.hidden = isArtists;
     }
 
     /* ---------- Render table ---------- */
@@ -435,7 +936,7 @@
         return '<span class="badge badge-status badge-saved"><i class="bi bi-check-circle me-1"></i>SAVED</span>';
     }
 
-    function renderTable() {
+    function renderTrackTable() {
         const tbody = $('#tracksBody');
         const list = visibleTracks();
         if (state.tracks.length === 0) {
@@ -523,22 +1024,29 @@
     }
 
     /* ---------- Selection ---------- */
+    function afterSelectionChange() {
+        if (state.viewMode === 'tracks') renderTrackTable();
+        else syncSelectionUi();
+        updateCounts();
+        updateBulkBtn();
+    }
+
     function toggleSelect(path) {
         if (state.selected.has(path)) state.selected.delete(path);
         else state.selected.add(path);
-        renderTable();
+        afterSelectionChange();
         updateBulkBtn();
     }
 
     function selectAllVisible() {
         visibleTracks().forEach((t) => state.selected.add(t.path));
-        renderTable();
+        renderView();
         updateBulkBtn();
     }
 
     function deselectAll() {
         state.selected.clear();
-        renderTable();
+        renderView();
         updateBulkBtn();
     }
 
@@ -639,7 +1147,7 @@
         if (resetBtn) {
             resetBtn.addEventListener('click', () => {
                 state.pending.delete(path);
-                renderTable();
+                renderView();
                 refreshDetails(path);
                 toast('Changes discarded', 'info');
             });
@@ -686,7 +1194,8 @@
         const p = state.pending.get(path) || {};
         p[field] = value;
         state.pending.set(path, p);
-        renderTable();
+        if (state.viewMode === 'tracks') renderTrackTable(); else patchTrackNode(path);
+        updateCounts();   // keeps the header "unsaved" counter live in both views
         updateDetailsStatus(path);
     }
 
@@ -790,7 +1299,8 @@
                 toast(`Partial save: ${savedCount} saved, ${failed.size} failed. ${firstErr}`, 'error');
                 state.selected.clear();
             }
-            renderTable();
+            computeTotals();
+            renderView();
             if (state.currentPath) refreshDetails(state.currentPath);
         } catch (err) {
             toast(`Unable to save changes: ${err.message}`, 'error');
@@ -805,20 +1315,29 @@
         const path = state.libraryPath;
         setBusy(true, 'Loading library...', path || '');
         const tbody = $('#tracksBody');
-        tbody.innerHTML = '<tr><td colspan="12" class="text-center py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</td></tr>';
+        const tree = $('#artistTree');
+        const loadingRow = '<tr><td colspan="12" class="text-center py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</td></tr>';
+        tbody.innerHTML = loadingRow;
+        if (tree) {
+            tree.innerHTML = '<div class="empty-state"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</div>';
+        }
         try {
             const res = await api('api/tracks.php?path=' + encodeURIComponent(path));
             state.tracks = res.tracks || [];
             state.pending.clear();
             state.selected.clear();
             state.currentPath = null;
+            state.expandedArtists.clear();
+            state.expandedAlbums.clear();
+            computeTotals();
             activeDetailsContainer().innerHTML = '<div class="empty-state"><i class="bi bi-music-note-beamed"></i><p>Select a track to edit it</p></div>';
-            renderTable();
+            renderView();
             toast(`${state.tracks.length} tracks loaded`, 'success');
             setApiStatus(true);
         } catch (err) {
             state.tracks = [];
-            renderTable();
+            computeTotals();
+            renderView();
             toast(`Unable to load library: ${err.message}`, 'error');
             setApiStatus(false);
         } finally {
@@ -840,7 +1359,12 @@
         if (state.libraryPath) {
             await loadLibrary();
         } else {
-            $('#tracksBody').innerHTML = '<tr><td colspan="12" class="text-center py-5"><div class="empty-state"><i class="bi bi-folder2-open"></i><p>Enter the library path and press SCAN.</p></div></td></tr>';
+            const emptyRow = '<tr><td colspan="12" class="text-center py-5"><div class="empty-state"><i class="bi bi-folder2-open"></i><p>Enter the library path and press SCAN.</p></div></td></tr>';
+            $('#tracksBody').innerHTML = emptyRow;
+            const tree = $('#artistTree');
+            if (tree) tree.innerHTML = '<div class="empty-state"><i class="bi bi-folder2-open"></i><p>Enter the library path and press SCAN.</p></div>';
+            syncViewUI();
+            updateCounts();
         }
     }
 
@@ -960,7 +1484,7 @@
             pend.cover = coverChoice;
             state.pending.set(p, pend);
         }
-        renderTable();
+        renderView();
         if (state.currentPath) refreshDetails(state.currentPath);
         bootstrap.Modal.getInstance('#coverModal').hide();
         toast(`Cover applied to ${targets.length} tracks — press "Save Changes" to embed it`, 'success', 'Cover');
@@ -1042,7 +1566,7 @@
         // Scarta solo le scelte della finestra multipla: non tocca i pending preesistenti
         // (es. modifiche già aperte nel pannello dettagli) né i dati già salvati su disco.
         clearBulkCover();
-        renderTable();
+        renderView();
         toast('Bulk changes discarded', 'info', 'Bulk Edit');
     }
 
@@ -1110,6 +1634,116 @@
         bootstrap.Modal.getInstance('#bulkModal').hide();
     }
 
+    /* ---------- Library tree interactions ---------- */
+    function toggleArtistNode(key) {
+        const node = document.querySelector(`[data-artist-node="${cssEscape(key)}"]`);
+        if (!node) return;
+        const target = node.querySelector('.artist-body');
+        if (!target) return;
+        if (state.expandedArtists.has(key)) state.expandedArtists.delete(key);
+        else state.expandedArtists.add(key);
+        bootstrap.Collapse.getOrCreateInstance(target).toggle();
+    }
+
+    function toggleAlbumNode(key) {
+        const el = document.querySelector(`[data-children-of="album"][data-album="${cssEscape(key)}"]`);
+        if (!el) return;
+        const willOpen = !state.expandedAlbums.has(key);
+        if (willOpen) {
+            ensureAlbumTracks(el);
+            state.expandedAlbums.add(key);
+        } else {
+            state.expandedAlbums.delete(key);
+        }
+        // Nessun effetto collaterale: tocca solo questo album.
+        setAlbumTracksVisible(el, willOpen);
+    }
+
+    function setGroupSelection(key, checked, kind) {
+        const group = kind === 'artist'
+            ? (findArtist(key) ? findArtist(key).tracks : [])
+            : (findAlbum(key) ? findAlbum(key).tracks : []);
+        for (const t of group) {
+            if (checked) state.selected.add(t.path);
+            else state.selected.delete(t.path);
+        }
+        afterSelectionChange();
+    }
+
+    function wireLibraryTree() {
+        const tree = $('#artistTree');
+        if (!tree) return;
+
+        // Bootstrap collapse events bubble: one delegated listener for both levels.
+        // Solo il livello artista usa Bootstrap Collapse: cosi' nessun evento di
+        // transizione puo' interferire con l'espansione dei singoli album.
+        tree.addEventListener('show.bs.collapse', (e) => {
+            const el = e.target;
+            if (el.dataset.childrenOf !== 'artist') return;
+            ensureArtistChildren(el);
+            const node = el.parentElement;
+            node.classList.add('expanded');
+            const row = node.querySelector('.artist-row');
+            if (row) row.setAttribute('aria-expanded', 'true');
+        });
+        tree.addEventListener('hidden.bs.collapse', (e) => {
+            const el = e.target;
+            if (el.dataset.childrenOf !== 'artist') return;
+            const node = el.parentElement;
+            node.classList.remove('expanded');
+            const row = node.querySelector('.artist-row');
+            if (row) row.setAttribute('aria-expanded', 'false');
+            // Lo stato degli album NON viene modificato: riaprendo l'artista i
+            // blocchi tracce ritornano visibili esattamente come erano.
+        });
+
+        tree.addEventListener('click', (e) => {
+            if (e.target.closest('.artist-check, .album-check, .tv-check')) return;
+            const editBtn = e.target.closest('[data-action="edit-track"]');
+            if (editBtn) {
+                e.preventDefault();
+                showDetails(editBtn.dataset.path);
+                return;
+            }
+            const artistToggle = e.target.closest('[data-action="toggle-artist"]');
+            if (artistToggle) {
+                e.preventDefault();
+                toggleArtistNode(artistToggle.dataset.artist);
+                return;
+            }
+            const albumToggle = e.target.closest('[data-action="toggle-album"]');
+            if (albumToggle) {
+                e.preventDefault();
+                toggleAlbumNode(albumToggle.dataset.album);
+                return;
+            }
+            const row = e.target.closest('[data-track-row]');
+            if (row) {
+                e.preventDefault();
+                showDetails(row.dataset.trackRow);
+            }
+        });
+
+        tree.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const a = e.target.closest('[data-action="toggle-artist"]');
+            const b = e.target.closest('[data-action="toggle-album"]');
+            if (!a && !b) return;
+            e.preventDefault();
+            if (a) toggleArtistNode(a.dataset.artist);
+            else toggleAlbumNode(b.dataset.album);
+        });
+
+        tree.addEventListener('change', (e) => {
+            const cb = e.target.closest('.tv-check');
+            if (cb) { toggleSelect(cb.dataset.path); return; }
+            const ac = e.target.closest('.artist-check');
+            if (ac) { setGroupSelection(ac.dataset.artist, ac.checked, 'artist'); return; }
+            const alc = e.target.closest('.album-check');
+            if (alc) setGroupSelection(alc.dataset.album, alc.checked, 'album');
+        });
+    }
+
     /* ---------- Events ---------- */
     function wireEvents() {
         $('#scanBtn').addEventListener('click', () => {
@@ -1145,7 +1779,7 @@
             debounceTimer = setTimeout(() => {
                 state.searchQuery = e.target.value;
                 $('#clearSearchBtn').classList.toggle('hidden', !e.target.value);
-                renderTable();
+                renderView();
             }, 150);
         });
 
@@ -1153,17 +1787,17 @@
             $('#searchInput').value = '';
             state.searchQuery = '';
             $('#clearSearchBtn').classList.add('hidden');
-            renderTable();
+            renderView();
         });
 
         $('#filterFormat').addEventListener('change', (e) => {
             state.filterFormat = e.target.value;
-            renderTable();
+            renderView();
         });
 
         $('#filterStatus').addEventListener('change', (e) => {
             state.filterStatus = e.target.value;
-            renderTable();
+            renderView();
         });
 
         $('#selectAllCheckbox').addEventListener('change', (e) => {
@@ -1173,6 +1807,19 @@
 
         $('#selectAllBtn').addEventListener('click', selectAllVisible);
         $('#deselectAllBtn').addEventListener('click', deselectAll);
+
+        $('#viewArtistsBtn').addEventListener('click', () => {
+            if (state.viewMode === 'artists') return;
+            state.viewMode = 'artists';
+            renderView();
+        });
+        $('#viewTracksBtn').addEventListener('click', () => {
+            if (state.viewMode === 'tracks') return;
+            state.viewMode = 'tracks';
+            renderView();
+        });
+
+        wireLibraryTree();
 
         $('#tracksBody').addEventListener('click', (e) => {
             const playBtn = e.target.closest('.btn-play-row');

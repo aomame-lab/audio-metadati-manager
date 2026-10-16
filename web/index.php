@@ -21,8 +21,9 @@
                 </a>
 
                 <div class="d-flex align-items-center gap-2 order-lg-3">
-                    <span class="badge rounded-pill badge-soft d-none d-sm-inline-flex align-items-center gap-1" id="trackCountBadge" title="Tracks loaded">
-                        <i class="bi bi-collection"></i> <span id="trackCount">0</span> tracks
+                    <span class="badge rounded-pill badge-soft library-badge" id="trackCountBadge" title="Library summary">
+                        <i class="bi bi-collection" aria-hidden="true"></i>
+                        <span id="libraryStats" class="library-stats-inline" aria-live="polite">—</span>
                     </span>
                     <button class="btn btn-icon" type="button" id="reloadBtn" data-bs-toggle="tooltip" data-bs-placement="bottom" aria-label="Reload library" title="Reload library">
                         <i class="bi bi-arrow-clockwise"></i>
@@ -43,18 +44,32 @@
     </header>
 
     <main class="app-main container-fluid px-3 px-lg-4 py-3 py-lg-4">
- 
+
+        <!-- ======= LIBRARY HEADER ======= -->
+        <div class="library-header">
+            <div class="library-header-search">
+                <div class="search-wrap w-100" style="max-width: 460px;">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" id="searchInput" class="form-control" placeholder="Search artist, album or track..." aria-label="Search artist, album or track" autocomplete="off">
+                        <button class="btn btn-clear hidden" type="button" id="clearSearchBtn" tabindex="-1" aria-label="Clear search" title="Clear search">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ======= TOOLBAR ======= -->
         <div class="app-toolbar d-flex flex-column flex-lg-row gap-2 gap-lg-3 align-items-lg-center mb-3">
 
-            <div class="search-wrap flex-grow-1" style="max-width: 460px;">
-                <div class="input-group">
-                    <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="search" id="searchInput" class="form-control" placeholder="Search by title, artist, album, file, genre..." aria-label="Search tracks" autocomplete="off">
-                    <button class="btn btn-clear hidden" type="button" id="clearSearchBtn" tabindex="-1" aria-label="Clear search" title="Clear search">
-                        <i class="bi bi-x-lg"></i>
-                    </button>
-                </div>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Library view">
+                <button class="btn btn-outline-secondary" type="button" id="viewArtistsBtn" aria-pressed="true" title="Browse by artist and album">
+                    <i class="bi bi-diagram-3"></i><span class="d-none d-md-inline ms-1">Artists</span>
+                </button>
+                <button class="btn btn-outline-secondary" type="button" id="viewTracksBtn" aria-pressed="false" title="Flat list of all tracks">
+                    <i class="bi bi-list-ul"></i><span class="d-none d-md-inline ms-1">Tracks</span>
+                </button>
             </div>
 
             <div class="d-flex flex-wrap align-items-center gap-2">
@@ -89,9 +104,24 @@
         <!-- ======= CONTENT ======= -->
         <div class="row g-3 g-lg-4">
 
-            <!-- Table column -->
+            <!-- Library column -->
             <div class="col-12 col-lg-8 col-xxl-9">
-                <section class="panel" aria-label="Track list">
+
+                <!-- Hierarchy: Artist -> Album -> Track -->
+                <section class="panel library-panel" id="artistViewPanel" aria-label="Library by artist, album and track">
+                    <div class="tree-head" aria-hidden="true">
+                        <span class="tree-head-cell">Artist / Album</span>
+                        <span class="tree-head-cell tree-head-num">Tracks</span>
+                    </div>
+                    <div id="artistTree" class="artist-tree" role="tree" aria-label="Library hierarchy"></div>
+                    <div class="panel-footer d-flex justify-content-between align-items-center">
+                        <span class="text-muted small" id="treeResultInfo">0 results</span>
+                        <span class="text-muted small" id="libraryInfo"></span>
+                    </div>
+                </section>
+
+                <!-- Flat list -->
+                <section class="panel" id="trackViewPanel" aria-label="Track list" hidden>
                     <div class="table-responsive">
                         <table class="table table-tracks align-middle mb-0" id="tracksTable">
                             <thead>
@@ -124,9 +154,9 @@
                     </div>
                     <div class="panel-footer d-flex justify-content-between align-items-center">
                         <span class="text-muted small" id="resultInfo">0 results</span>
-                        <span class="text-muted small" id="libraryInfo"></span>
                     </div>
                 </section>
+
             </div>
 
             <!-- Details column -->

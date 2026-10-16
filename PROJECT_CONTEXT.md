@@ -133,10 +133,15 @@ const state = {
     filterFormat: 'all',   // '.mp3', '.flac', '.m4a', or 'all'
     filterStatus: 'all',   // 'all', 'unsaved', 'saved'
     busy: false,           // whether a save/scan operation is in progress
-    viewMode: 'tree',      // 'list' or 'tree' — default is 'tree' per requirement
-    treeCache: null,       // cached tree structure for Artist->Album->Tracks grouping
+    viewMode: 'artists',   // 'artists' (Artist->Album->Track) | 'tracks' (flat list)
+    expandedArtists: new Set(), // artist keys currently expanded
+    expandedAlbums: new Set(),  // album keys currently expanded
+    totals: { artists: 0, albums: 0 }, // computed on the WHOLE library, not on filters
 };
 ```
+
+Il modello gerarchico lives in a module-level `libraryModel`, rebuilt by
+`buildLibraryModel()` on every full render and dropped when the library reloads.
 
 ### Ricerca e filtri:
 
@@ -145,55 +150,138 @@ const state = {
   - `state.filterFormat` — filters by audio extension
   - `state.filterStatus` — 'unsaved' (tracks with pending changes), 'saved' (tracks without)
 - Debounced at 150ms on `#searchInput` input event
-- `updateCounts()` shows `visibleCount of state.tracks.length results`
+- `updateCounts()` shows `visibleCount of state.tracks.length results` in BOTH footers
+  (`#resultInfo` flat list, `#treeResultInfo` hierarchy) and fills the **single**
+  summary `#libraryStats`, which lives **inside the existing `#trackCountBadge`** of the
+  header. There is no second summary area: the old `.library-stats` paragraph under the
+  library title was removed.
+  - Tracks / artists / albums come from `state.tracks` and `state.totals` (whole
+    library, unaffected by filters); `N sel.` appears only when `state.selected.size > 0`;
+    `N unsaved` only when `state.pending.size > 0`
+  - `.library-badge` keeps the summary on one line and shrinks under 576px
 
 ### Modalità visualizzazione:
 
-- **Default**: `viewMode: 'tree'` per requirement — shows Artist → Album → Tracks accordion tree
-- **List mode** (`viewMode: 'table'`): shows original flat table (toggle via toolbar buttons)
-- `syncViewUI()` updates visibility of `#listViewSection` / `#treeViewSection` and button active states
-- On initial load with no library: `render()` → `renderTree()` shows "No tracks found" in tree view
+- **Default**: `viewMode: 'artists'` — the hierarchy is the primary navigation
+- **List mode** (`viewMode: 'tracks'`): the original flat table, kept intact
+- Toolbar `btn-group` `#viewArtistsBtn` / `#viewTracksBtn` toggles the mode;
+  `syncViewUI()` swaps `#artistViewPanel` / `#trackViewPanel` (`hidden`) and the
+  `.active` button state
+- `renderView()` is the single render entry point: it calls `syncViewUI()`,
+  renders the active view, then `updateCounts()`
 
-### Raggruppamento Artista → Album → Tracce (tree view):
+### Vista gerarchica Artista → Album → Tracce (`app.js`)
 
-**Grouping keys (normalized, no metadata modification):**
+**Nessuna modifica al backend e nessuna richiesta HTTP aggiuntiva**: `api/tracks.php`
+already returns every metadata field in a single call, so the grouping is computed
+in memory from `visibleTracks()`.
 
-- `norm(str)` — lowercase, trim, remove leading "The"/"A"/"An"
-- `getArtistKey(track)` — `album_artist` if present and non-empty, otherwise `artist`; normalized
-- `getAlbumKey(track)` — `artistKey + '\0' + albumNormalized` — distinguishes same-named albums by different artists
-- Missing artist → `__unknown_artist__`; missing album → `__unknown_album__`
+**Chiavi di raggruppamento (normalizzate, nessun metadato viene modificato):**
 
-**Sorting (per requirement):**
+- `foldKey(value)` — NFD + rimozione diacritici, lowercase, spazi collassati, trim.
+  Usata sia per il raggruppamento sia per la ricerca, così `"luci"` trova
+  `"Luci d'Inverno"` e `"BJÖRK"` trova `"Björk"`.
+- Artista: `album_artist` se presente e non vuoto, altrimenti `artist`, altrimenti
+  `UNKNOWN_ARTIST` ("Unknown artist"). Chiave `foldKey(nome) || '__unknown__artist'`.
+- Album: `albumKeyOf(artistKey, albumName)` = `len(artistKey) + ':' + artistKey + ':' + foldKey(album)`
+  (o `'__unknown__album'`). **Il prefisso di lunghezza rende la concatenazione
+  iniettiva**: artista `"a b"` + album `"c"` non collide con artista `"a"` + album
+  `"b c"`. Vedi la nota sui caratteri di controllo nella sezione 9.
+- Un brano senza album non viene nascosto: finisce sotto l'album "Unknown album"
+  dello stesso artista.
+- Un file compare una sola volta: `buildLibraryModel()` deduplica per `path`.
 
-- Artists: alphabetical by name
-- Albums: by year ascending (albums without year at end), then by name
-- Tracks: by tracknumber, then by filename
+**Ordinamento:**
 
-**Tree rendering structure (Bootstrap Collapse):**
+- Artisti: `localeCompare(..., {sensitivity:'base', numeric:true})`; "Unknown artist" per ultimo
+- Album: per anno crescente, album senza anno in fondo, poi per nome
+- Tracce: per numero traccia, poi per filename
 
-- `#libraryTree` container with `role="tree"`
-- **Artist nodes** (`artist-node`): expanded/collapsed viachevron, show cover thumbnail, album count + track count + total duration, checkbox to select/deselect all descendant tracks, play-all button
-- **Album nodes** (`album-node`): nested inside artist, chevron to expand/collapse, show cover thumbnail, track count + duration + year, checkbox to select/deselect all tracks in album, play-all button
-- **Lazy rendering**: album tracks `<table>` rendered only on first `shown.bs.collapse` event per album (via `renderAlbumTracks(albumKey)`). Placeholder shows "Loading tracks..." until then.
-- **One-level-at-a-time accordion**: `data-bs-parent="#libraryTree"` on collapse elements ensures only one artist and one album per artist can be expanded simultaneously
+**Struttura DOM ed espansione indipendente:**
+
+```
+.artist-node
+  .artist-row                              <- toggle artista (Bootstrap Collapse)
+  .collapse.artist-body                    <- UNICO collapse dell'artista
+    .artist-body-grid                      <- griglia: card album (1 cell) + blocchi tracce (1/-1)
+      .album-card                          <- copertina + titolo/anno/checkbox/conteggio
+      .album-tracks  [hidden]              <- contenitore DEDICATO delle tracce, FRATELLO della card
+        .album-tracks-head
+        .album-tracks-body                 <- .track-list-compact (lazy)
+      .album-card
+      .album-tracks  [hidden]
+```
+
+- I blocchi tracce **non** stanno dentro `.album-card` (che è larga ~148px) né dentro
+  `.artist-children`/`.album-grid`: sono fratelli diretti nella griglia e occupano
+  l'intera larghezza (`grid-column: 1 / -1`), così l'ordine visivo è
+  artista → album → tracce **del relativo album**, con indentazione chiara.
+- **Solo l'artista usa Bootstrap Collapse.** L'espansione di un album è governata
+  dall'attributo `hidden` del proprio blocco (`setAlbumTracksVisible()`), quindi:
+  - aprire/chiudere un album non ha effetti collaterali sugli album vicini;
+  - il collapse dell'artista nasconde visivamente tutta la sezione (album + tracce)
+    perché li racchiude entrambi, ma **non** modifica `state.expandedAlbums`;
+  - riaprendo l'artista ogni album torna esattamente nello stato precedente e i
+    blocchi non vengono ricostruiti (nessuna duplicazione di tracce).
+- `ensureAlbumTracks(el)` riempie solo `.album-tracks-body` ed è idempotente
+  (`dataset.filled`).
+
+**Rendering lazy (nessun reload di pagina):**
+
+- `renderArtistTree()` renderizza **solo** le righe artista nel contenitore `#artistTree`
+- I figli sono materializzati al primo `show.bs.collapse`, che è **delegato** su
+  `#artistTree` (gli eventi Bootstrap fanno bubbling, quindi un solo listener):
+  - `ensureArtistChildren(el)` → `.artist-body-grid` con le coppie card + blocco tracce
+  - `ensureAlbumTracks(el)` → riempie `.album-tracks-body` con `.track-list-compact`
+  - entrambe sono idempotenti: `el.dataset.filled === '1'` evita il doppio render
+- Il listener `show.bs.collapse` / `hidden.bs.collapse` **ignora** tutto ciò che non è
+  `data-children-of="artist"`: non c'è più un collapse annidato da intercettare
+- Lo stato di espansione vive in `state.expandedArtists` / `state.expandedAlbums`, quindi
+  un re-render (salvataggio, cambio filtro, cambio vista) **ripristina** what was open
+- Con una ricerca attiva tutti gli artisti e gli album vengono aperti automaticamente,
+  così la traccia che corrisponde è raggiungibile senza espandere a mano
+- `cssEscape()` escape solo `"` e `\` per selettori ad attributo quotati: **non**
+  delega a `CSS.escape`, che escaperebbe anche gli spazi (legali dentro le virgolette)
+  e romperebbe il lookup. Gli `id` DOM (`ar-N`, `al-N`) sono basati sulla posizione,
+  mai sulle chiavi, perché una chiave può contenere `:` o virgolette
+
+**Interazione (tutto delegato su `#artistTree`):**
+
+- `.artist-row` → `toggleArtistNode(key)` → `bootstrap.Collapse.toggle()`
+- `.album-cover-btn` → `toggleAlbumNode(key)`
+- `.tv-edit-btn` o click sulla riga → `showDetails(path)` (pannello dettagli esistente)
+- Tastiera: `Enter` / `Spazio` su riga artista e card album
+- `.tv-check`, `.artist-check`, `.album-check` → `change` delegato
+
+**Copertine:** riutilizzano `effectiveCoverUrl(track)` e `coverImgHtml()` dell'app
+esistente; l'anteprima dell'artista è il primo album con copertina, quella dell'album
+è il primo brano con copertina. Nessun secondo sistema di gestione immagini.
 
 ### Selezione:
 
-- **Track checkboxes** (`.select-track`): toggle individual track selection, call `toggleSelect(path)` → `render()` → `updateBulkBtn()`
-- **Artist checkbox** (`.select-artist`): selects/deselects all tracks by that artist; indeterminate state for partial selection
-- **Album checkbox** (`.select-album`): selects/deselects all tracks in that album; indeterminate state for partial selection
-- **Album tracks header checkbox** (`.select-album-tracks`, lazy-rendered): selects/deselects all tracks in the lazy-loaded album table
-- **Select All / Deselect All** toolbar buttons: call `selectAllVisible()` / `deselectAll()` → `visibleTracks()` → add/remove from `state.selected`
-- `state.selected` is a `Set` of track `path` values — no duplication, selection is purely path-based
-- Bulk edit modal pre-fills with values from `mergedTrack()` (pending + original); applying stages changes to `state.pending`
+- **Checkbox di brano** (`.tv-check`): `toggleSelect(path)` → `afterSelectionChange()`,
+  che NON ricostruisce l'albero ma chiama `syncSelectionUi()` (aggiorna solo i
+  checkbox e i contatori già renderizzati) — evita re-render a ogni click
+- **Checkbox di artista** (`.artist-check`) e **di album** (`.album-check`):
+  `setGroupSelection(key, checked, kind)` seleziona/deseleziona tutti i brani del gruppo,
+  con stato *indeterminate* quando la selezione è parziale
+- **Contatori**: `.artist-stats` mostra `selezionati/totale`; la card album mostra un badge
+- `state.selected` è un `Set` di `path`: espandere/comprimere non lo tocca
+- Pulsanti Select / Deselect della toolbar → `selectAllVisible()` / `deselectAll()`
+- Il comando "Edit Selected" (`#bulkBtn`) e il relativo dialog funzionano invariati:
+  le checkbox della gerarchia alimentano lo stesso `state.selected`
 
 ### Modifiche non salvate:
 
 - `state.pending` Map tracks paths to pending field changes
-- Row gets `dirty-row` CSS class, badge shows "UNSAVED"
-- `setPendingField(path, field, value)` updates `state.pending` and re-renders table
-- Details panel badge and "Discard Changes" button reset `state.pending.delete(path)` and re-render
-- `saveTracks()` sends pending changes to API, on success removes paths from `state.pending`, re-renders tree
+- Riga tabella: classe `dirty-row`; riga gerarchica: classe `tv-dirty` + pallino
+  `.tv-dot.is-dirty` + etichetta `UNSAVED`
+- `setPendingField(path, field, value)` fa un **patch mirato** nella vista gerarchica
+  (`patchTrackNode(path)`) invece di un re-render completo, così la gerarchia non
+  collassa mentre si digita; chiama comunque `updateCounts()` per l'indicatore
+  "unsaved" dell'intestazione
+- `saveTracks()` sends pending changes to API, on success removes paths from
+  `state.pending`, recomputes totals and re-renders the active view
 
 ### Player / Playlist:
 
@@ -344,3 +432,146 @@ come prima: `web/config.local.php` (non tracciato) oppure la variabile
 ✓ Copertine invariato
 ✓ Nessuna nuova dipendenza
 ✓ Nessun commit/push
+## 9. Vista libreria Artisti → Album → Brani (2026-10-16)
+
+### Scelte progettuali
+
+- **Frontend-only.** `api/tracks.php` restituisce già tutti i campi metadata in una
+  sola richiesta, quindi il raggruppamento avviene in memoria: nessuna nuova API,
+  nessun endpoint duplicato, **zero richieste HTTP per brano**.
+- **Il backend non è stato toccato.** Nessun file in `web/api/`, `python/` o
+  `python/comm.py` è stato modificato.
+- **Vista lista conservata.** La gerarchia è la vista predefinita; la tabella piatta
+  esistente resta raggiungibile con un toggle, così le funzionalità già valide non
+  vengono perse.
+- **Nessun secondo sistema di salvataggio o di copertine.** La gerarchia riusa
+  `showDetails()`, `saveTracks()`, `setPendingField()`, `mergedTrack()`,
+  `effectiveCoverUrl()`, `state.pending` e `state.selected`.
+- **Markup sicuro.** Ogni valore proveniente dai metadata passa da `esc()` prima di
+  finire in HTML; `highlight()` escapa e poi evidenzia, senza costruire mai markup da
+  stringhe grezze.
+
+### Errori trovati e corretti durante il collaudo
+
+1. **Byte NUL (0x00) nella sorgente JS.** Due separatori di chiave album erano byte NUL
+   letterali. Nell'HTML un NUL dentro un attributo diventa U+FFFD, quindi la chiave
+   letta dal DOM non combaciava più con quella del modello e l'espansione degli album
+   non caricava le tracce. Risolto con `albumKeyOf()` a lunghezza prefissata, che è
+   iniettiva e usa solo caratteri stampabili.
+2. **ID DOM derivati dalle chiavi.** Contenevano `:` e virgolette, quindi erano
+   selettori CSS non validi (`querySelector` solleva `SyntaxError`). Gli ID ora sono
+   posizionali (`ar-0`, `al-3`); le chiavi restano solo in attributi `data-*`.
+3. **`CSS.escape` non adatto.** DelegaProduceva selettori non validi per chiavi con
+   spazi. Sostituito da `cssEscape()` che escape solo `"` e `\`.
+4. **Contatore "unsaved" fermo nella vista gerarchia.** `setPendingField()` non
+   chiamava `updateCounts()` nel ramo artists: l'intestazione non mostrava le
+   modifiche non salvate. Corretto.
+
+### Test effettuati
+
+Collaudo reale in **Google Chrome headless** (non simulato), contro una libreria di
+test costruita appositamente con 9 brani su 5 artisti, di cui: artista con 2 album,
+album con più braci, brano senza artista/album/anno/copertina, album senza anno,
+brano senza album, nomi con accenti e nomi simili.
+
+- **Suite interattiva: 63 test, 63 PASS** (espansione/compressione ripetuta,
+  selezione multipla tra album diversi, selezione tramite checkbox artista con stato
+  indeterminato, modifica singola + scarto, salvataggio reale con verifica del titolo
+  aggiornato senza reload, ricerca con rivelazione dei livelli genitori, ricerca senza
+  accenti, ricerca case-insensitive, stato vuoto, conteggi, cambio vista)
+- **Controllo console: 0 errori JS** dopo un percorso completo (espansione di tutti
+  gli artisti, selezione, filtri, ricerca, cambio vista, reload)
+- **Prestazioni:** 10 140 brani / 60 artisti → 60 righe artista, 0 album card e 0
+  track row al primo render (lazy confermato), ~517 ms totali incluso il parsing del
+  JSON da 3,3 MB
+- **Docker Compose:** `docker compose build` + `up -d` eseguiti; 17 test di
+  interazione sulla libreria reale (Soundgarden) → 17 PASS; nessun file audio
+  dell'utente modificato (il test usa Annulla, non Salva)
+
+Limiti dichiarati: il backend impiega ~62 s per restituire 10 140 brani (lettura
+mutagen file per file) — è un comportamento preesistente di `list_tracks`, non
+introdotto dalla vista. La validazione visiva (layout, responsive, transizioni) è
+stata fatta sul DOM e sul comportamento, non con uno screenshot.
+
+### File modificati
+
+- `web/index.php` — intestazione libreria (`#libraryStats` + ricerca), toggle vista,
+  pannello gerarchico `#artistViewPanel` con `#artistTree`, lista piatta in
+  `#trackViewPanel`
+- `web/assets/js/app.js` — stato (`viewMode`, `expandedArtists`, `expandedAlbums`,
+  `totals`), `libraryModel`, `foldKey()`, `albumKeyOf()`, `buildLibraryModel()`,
+  `renderArtistTree()`, `ensureArtistChildren()`, `ensureAlbumTracks()`,
+  `renderView()`, `syncViewUI()`, `syncSelectionUi()`, `patchTrackNode()`,
+  `afterSelectionChange()`, `computeTotals()`, `wireLibraryTree()`,
+  `toggleArtistNode()`, `toggleAlbumNode()`, `setGroupSelection()`
+- `web/assets/css/style.css` — sezione "Library view": intestazione, toggle, righe
+  artista, griglia album, tabelle compatte, indicatori di stato
+
+## 10. Espansione album indipendente e conteggi nell'header (2026-10-16)
+
+### Modifiche
+
+**Header e conteggi.** La riga `<p class="library-stats">` sotto il titolo della libreria
+è stata rimossa. Il riepilogo vive ora **dentro il badge `#trackCountBadge`** che era già
+presente nell'header (`<span id="libraryStats">`), quindi non esiste una seconda area di
+riepilogo. Contenuto: `N tracks · N artisti · N albumi`, con `N sel.` quando ci sono
+selezioni e `N unsaved` quando ci sono modifiche pendenti. `.library-badge` mantiene il
+testo su una riga e riduce font/padding sotto 576px. L'elemento `#trackCount` è stato
+rimosso (era un duplicato del conteggio tracce).
+
+Significato dei conteggi invariato:
+- tracce / artisti / album = **libreria intera** (`state.tracks`, `state.totals`), non filtrati
+- selezionati = `state.selected.size`, non salvati = `state.pending.size`
+
+**Struttura della gerarchia.** I blocchi tracce sono usciti da `.album-card` e dal
+contenitore dei figli dell'artista: ora sono elementi dedicati `.album-tracks`, fratelli
+diretti delle card dentro `.artist-body-grid`, con `grid-column: 1 / -1`. L'espansione
+non usa più Bootstrap Collapse ma l'attributo `hidden`, così ogni album è governato da
+solo. Bootstrap Collapse è rimasto solo per l'artista, che racchiude album e tracce.
+
+Conseguenze verificate: aprire/chiudere un album non tocca gli altri; comprimere
+un artista nasconde album e tracce senza cancellare `state.expandedAlbums`; riaprendolo
+ogni album torna allo stato precedente e i blocchi non vengiono ricreati (nessuna
+duplicazione). Non sono stati usati workaround CSS: la separazione è strutturale.
+
+### Bug introdotto e corretto durante il collaudo
+
+Rinominando `.artist-children` → `.artist-body`, `toggleArtistNode()` era rimasta che
+cercava la classe vecchia e restituiva subito: **nessun artista era più espandibile**.
+Rilevato dal test "l'altro artista indipendente" e corretto verificando l'assenza di
+riferimenti obsoleti.
+
+### Test effettuati
+
+Collaudo reale in Google Chrome headless su una libreria di prova (9 brani, 5 artisti,
+artisti con più album, album senza anno, brani senza album/artista/copertina).
+
+- **Suite struttura + espansione: 50/50 PASS** — due album aperti insieme, chiusura di
+  uno senza effetti sull'altro, chiusura/riapertura ripetuta di album e artisti, stato
+  preservato, nessuna duplicazione, selezione su album diversi, editing singolo, scarto,
+  bulk (confermato che senza campi compilati non scrive nulla), ricerca in album chiuso,
+  conteggi header
+- **Console: 0 errori JS** dopo apertura/chiusura ripetuta di ogni album e artista,
+  selezioni, filtri, ricerca, cambio vista e reload
+- **Prestazioni**: 10 140 brani / 60 artisti → 60 righe artista, 0 album e 0 tracce al
+  primo render, ~564 ms incluso il parsing del JSON
+- **Docker Compose**: build + `up -d` eseguiti; suite finale **23/23 PASS** sulla
+  libreria reale, con asspettative derivate dai dati reali (2 album, 12 + 3 brani)
+
+Nota: i test su Docker usano solo "Annulla"/"Discard", non salvano sui file dell'utente.
+Al momento del collaudo la libreria reale conteneva metadata già modificati
+(album `test`, genre `Grung`) con mtime delle 13:10:47, valori **assenti da ogni file
+del progetto**: non sono stati scritti dai test automatici.
+
+### File modificati
+
+- `web/index.php` — badge `#trackCountBadge` con `#libraryStats`, rimozione del
+  `<p class="library-stats">`
+- `web/assets/js/app.js` — `updateCounts()` scrive nel badge; `albumTracksHtml()`;
+  `setAlbumTracksVisible()`; `toggleAlbumNode()` senza Collapse; `artistRowHtml()` con
+  `.artist-body` / `.artist-body-grid`; `ensureArtistChildren()`; `ensureAlbumTracks()`;
+  listener `show/hidden.bs.collapse` limitati al livello artista; rimozione di
+  `syncAlbumChevron()`
+- `web/assets/css/style.css` — `.library-badge`, `.library-stats-inline` (con override
+  per schermi stretti), `.artist-body`, `.artist-body-grid`, `.album-tracks[hidden]`,
+  `.album-tracks-head/-name/-count`
