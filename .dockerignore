@@ -8,6 +8,7 @@ __pycache__
 screenshot
 screenshots
 web/config.local.php
+.env
 music
 *.mp3
 *.flac

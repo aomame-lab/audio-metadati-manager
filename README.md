@@ -93,28 +93,65 @@ No PHP extensions or Composer are required. The application uses only the PHP bu
 The easiest way to run the application is using Docker Compose.
 
 1. **Prepare your music folder**
-   Create a `music` directory in the project root (or map an existing one in `docker-compose.yml`):
+
+   Create a `music` directory in the project root, or point the application at an
+   existing one. The path is not hardcoded: it is read from the `MUSIC_PATH`
+   variable, so this repository can be cloned and started on any machine without
+   editing `docker-compose.yml`.
+
+2. **Create your local configuration**
+
    ```bash
-   mkdir music
-   # Copy some music files into this folder for testing
+   cp .env.example .env
    ```
 
-2. **Start the application**
+   Then edit `.env` and set `MUSIC_PATH` to the **absolute path** of your music folder
+   on this machine:
+
    ```bash
-   docker compose build
-   docker compose up -d
+   MUSIC_PATH=/Users/alice/Music        # macOS / Linux
+   MUSIC_PATH=C:/Users/Alice/Music      # Windows
    ```
 
-3. **Access the application**
+   `.env` stays on your computer and is **not** committed to Git (`.env.example` is
+   the committed template and contains no secrets).
+
+   If you skip this step, `MUSIC_PATH` falls back to `./music`, the `music` folder in
+   the project root:
+
+   ```bash
+   mkdir music   # copy some audio files here
+   ```
+
+3. **Start the application**
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. **Access the application**
+
    Open your browser and go to: [http://localhost:8000](http://localhost:8000)
 
-4. **Configure the library**
-   By default, the Docker setup uses `/music` inside the container. You can change this by editing the `AUDIO_LIBRARY_OVERRIDE` environment variable in `docker-compose.yml`.
+5. **Configure the library**
 
-5. **Common Docker Commands**
+   Inside the container your folder is always mounted as `/music`, which is the
+   library root the application reads. To change it, edit `MUSIC_PATH` in `.env` and
+   run `docker compose up -d` again.
+
+6. **Common Docker Commands**
    - View logs: `docker compose logs -f`
    - Stop application: `docker compose down`
-   - Change host port: set `PORT=8080` in your environment or edit `docker-compose.yml`.
+   - Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Music folder requirements
+
+- The host folder must **exist**. If it does not, Docker creates an empty one and the
+  library will appear empty.
+- It must be **accessible to Docker**: on macOS and Windows, share the folder with
+  Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
+- The container needs **write access** to it, because metadata and embedded cover art
+  are written into your audio files.
 
 ### Permissions
 The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
@@ -151,6 +188,10 @@ pip install -r requirements.txt
   Download and install PHP from [php.net](https://www.php.net/downloads) and Python from [python.org](https://www.python.org/downloads/), then make sure both are available on your `PATH`.
 
 ## Configuration
+
+> **With Docker**, you don't need any of the following: set `MUSIC_PATH` in `.env`
+> (see [Docker setup](#docker-recommended-for-home-servers)) and your host folder is
+> mounted as `/music`, which the application reads automatically.
 
 The application needs to know where your music library is. There are three ways to configure it, in order of precedence:
 
@@ -246,6 +287,9 @@ It asks for a music folder, a global artist/album/year, and then the title and t
 .
 ├── install.sh              # One-shot installation script
 ├── start.sh                # Web server startup script
+├── docker-compose.yml      # Docker Compose configuration (reads MUSIC_PATH)
+├── .env.example            # Template for .env — committed, no secrets
+├── .env                    # Local Docker settings (ignored by Git)
 ├── requirements.txt        # Python dependencies (mutagen)
 ├── metadati.py             # Command-line interface
 ├── python/

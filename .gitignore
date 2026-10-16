@@ -22,6 +22,9 @@ dist/
 web/config.local.php
 web/config.php.bak
 config.local.php
+.env
+.env.local
+!.env.example
 
 # Personal tooling configuration
 opencode.json

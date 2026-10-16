@@ -31,6 +31,7 @@
 
     let coverContext = null;   // { type:'single', path } | { type:'bulk', paths:[] }
     let coverChoice = null;    // path | '__remove__' | null
+    let bulkDraft = null;      // { file: File, url: string, name: string } — copertina scelta nella finestra multipla, non ancora salvata
 
     /* ---------- Helpers ---------- */
     const $ = (sel, root = document) => root.querySelector(sel);
@@ -277,7 +278,7 @@
         } else {
             overlay.classList.add('d-none');
         }
-        ['scanBtn', 'reloadBtn', 'saveAllBtn', 'bulkBtn', 'selectAllBtn', 'deselectAllBtn'].forEach((id) => {
+        ['scanBtn', 'reloadBtn', 'bulkBtn', 'selectAllBtn', 'deselectAllBtn'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.disabled = on;
         });
@@ -333,7 +334,11 @@
         } catch (err) {
             throw new Error(`Invalid server response (HTTP ${res.status})`);
         }
-        if (!res.ok || data.success === false) {
+        // tolerateFailure: la risposta può riportare success:false con un elenco
+        // di errori per singolo elemento (es. bulk-update parziale). In quel caso
+        // l'errore va gestito dal chiamante, che conosce il dettaglio.
+        const tolerateFailure = options.tolerateFailure === true;
+        if (!res.ok || (data.success === false && !tolerateFailure)) {
             const err = new Error(data.error || data.detail || `Server error (HTTP ${res.status})`);
             err.detail = data.detail || '';
             throw err;
@@ -370,14 +375,18 @@
     function effectiveCoverUrl(track) {
         const m = mergedTrack(track);
         const enc = encodeURIComponent;
+        // Parametro di versione: dopo un salvataggio il brano ottiene una versione
+        // maggiore, quindi il browser richiede la nuova immagine invece di riusare
+        // quella in cache. Stesso meccanismo usato dal resto dell'app.
+        const v = track.coverVersion ? `&v=${enc(track.coverVersion)}` : '';
         if (typeof m.cover === 'string' && m.cover && m.cover !== '__embedded__') {
-            return `api/cover.php?path=${enc(m.cover)}`;
+            return `api/cover.php?path=${enc(m.cover)}${v}`;
         }
         if (m.cover === '__embedded__') {
-            return `api/cover.php?path=${enc(track.path)}&embedded=1`;
+            return `api/cover.php?path=${enc(track.path)}&embedded=1${v}`;
         }
         if (Array.isArray(track.covers) && track.covers.length) {
-            return `api/cover.php?path=${enc(track.covers[0])}`;
+            return `api/cover.php?path=${enc(track.covers[0])}${v}`;
         }
         return null;
     }
@@ -407,10 +416,6 @@
     function updateCounts() {
         $('#trackCount').textContent = state.tracks.length;
         $('#resultInfo').textContent = `${visibleTracks().length} of ${state.tracks.length} results`;
-        const unsaved = state.pending.size;
-        const saveBtn = $('#saveAllBtn');
-        $('#unsavedCount').textContent = unsaved;
-        saveBtn.disabled = unsaved === 0 || isBusy();
         $('#libraryInfo').textContent = state.libraryPath ? `Library: ${state.libraryPath}` : '';
     }
 
@@ -541,7 +546,7 @@
         const n = state.selected.size;
         const btn = $('#bulkBtn');
         btn.innerHTML = n > 0
-            ? `<i class="bi bi-pencil-square me-1"></i>Edit Selected <span class="badge bg-dark-subtle ms-1">${n}</span>`
+            ? `<i class="bi bi-pencil-square me-1"></i>Edit Selected <span class="badge bg-dark-subtle ms-1 badge-app-dark">${n}</span>`
             : '<i class="bi bi-pencil-square me-1"></i>Edit Selected';
         btn.classList.toggle('btn-gold', n > 0);
         btn.classList.toggle('btn-outline-secondary', n === 0);
@@ -752,6 +757,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'save', tracks: list.map(savePayload) }),
+                tolerateFailure: true,   // gestisce qui gli errori per singola traccia
             });
 
             const failed = new Map((res.errors || []).map((e) => [e.path, e.error]));
@@ -770,6 +776,9 @@
                 t.total = parseInt(m.total, 10) ? String(parseInt(m.total, 10)) : '0';
                 if (p.cover === '__remove__') t.has_cover = false;
                 else if (typeof p.cover === 'string' && p.cover) t.has_cover = true;
+                // La copertina è stata riscritta: invalida la cache del browser.
+                // Eseguito solo per le tracce salvate, mai in caso di errore.
+                if (p.cover !== undefined) t.coverVersion = (t.coverVersion || 0) + 1;
                 state.pending.delete(t.path);
                 savedCount++;
             }
@@ -935,20 +944,15 @@
             return;
         }
         const ctx = coverContext;
-        const targets = ctx.type === 'single'
-            ? [ctx.path]
-            : ctx.paths.slice();
+        const targets = [ctx.path];
 
-        if (ctx.type === 'single') {
-            const applyAll = $('#coverApplyAllCheckbox').checked;
-            if (applyAll) {
-                const ref = findTrack(ctx.path);
-                const folder = ref ? ref.path.slice(0, ref.path.lastIndexOf('/')) : '';
-                const albumTracks = state.tracks
-                    .filter((t) => t.path.slice(0, t.path.lastIndexOf('/')) === folder)
-                    .map((t) => t.path);
-                targets.push(...albumTracks.filter((p) => !targets.includes(p)));
-            }
+        if ($('#coverApplyAllCheckbox').checked) {
+            const ref = findTrack(ctx.path);
+            const folder = ref ? ref.path.slice(0, ref.path.lastIndexOf('/')) : '';
+            const albumTracks = state.tracks
+                .filter((t) => t.path.slice(0, t.path.lastIndexOf('/')) === folder)
+                .map((t) => t.path);
+            targets.push(...albumTracks.filter((p) => !targets.includes(p)));
         }
 
         for (const p of targets) {
@@ -956,13 +960,92 @@
             pend.cover = coverChoice;
             state.pending.set(p, pend);
         }
-        bootstrap.Modal.getInstance('#coverModal').hide();
         renderTable();
         if (state.currentPath) refreshDetails(state.currentPath);
-        toast(`Cover applied to ${targets.length} tracks — press Save to embed it`, 'success', 'Cover');
+        bootstrap.Modal.getInstance('#coverModal').hide();
+        toast(`Cover applied to ${targets.length} tracks — press "Save Changes" to embed it`, 'success', 'Cover');
     }
 
-    /* ---------- Bulk edit ---------- */
+/* ---------- Bulk edit ---------- */
+    function renderBulkCover() {
+        const img = $('#bulkCoverPreview');
+        const ph = $('#bulkCoverPlaceholder');
+        const pickLabel = $('#bulkCoverPickLabel');
+        const fileLabel = $('#bulkCoverLabel');
+        const clearBtn = $('#bulkCoverClearBtn');
+        const input = $('#bulkCoverInput');
+        if (!img || !ph) return;
+
+        if (bulkDraft) {
+            img.src = bulkDraft.url;
+            img.hidden = false;
+            ph.classList.add('d-none');
+            if (pickLabel) pickLabel.textContent = 'Replace image...';
+            if (fileLabel) {
+                fileLabel.textContent = bulkDraft.name;
+                fileLabel.title = bulkDraft.name;
+            }
+            if (clearBtn) clearBtn.classList.remove('d-none');
+        } else {
+            img.removeAttribute('src');
+            img.hidden = true;
+            ph.classList.remove('d-none');
+            if (pickLabel) pickLabel.textContent = 'Choose image...';
+            if (fileLabel) {
+                fileLabel.textContent = 'No file selected.';
+                fileLabel.removeAttribute('title');
+            }
+            if (clearBtn) clearBtn.classList.add('d-none');
+        }
+        // Consente di riselezionare lo stesso file
+        if (input) input.value = '';
+    }
+
+    function setBulkCoverFile(file) {
+        const isJpeg = file && (
+            /image\/jpe?g/i.test(file.type || '') || /\.(jpe?g)$/i.test(file.name || '')
+        );
+        if (!isJpeg) {
+            toast('Only JPEG images (.jpg / .jpeg) are supported', 'error', 'Cover');
+            renderBulkCover();
+            return;
+        }
+        // Libera l'object URL precedente per non trattenere il file in memoria
+        if (bulkDraft && bulkDraft.url) URL.revokeObjectURL(bulkDraft.url);
+        bulkDraft = {
+            file: file,
+            url: URL.createObjectURL(file),
+            name: file.name || 'cover.jpg',
+        };
+        renderBulkCover();
+        // Nessun salvataggio: la finestra multipla resta aperta e il file non
+        // viene ancora incorporato nei brani.
+        toast(`Cover ready: ${bulkDraft.name} — press "Salva modifiche" to apply`, 'info', 'Cover');
+    }
+
+    function clearBulkCover() {
+        if (bulkDraft && bulkDraft.url) URL.revokeObjectURL(bulkDraft.url);
+        bulkDraft = null;
+        renderBulkCover();
+    }
+
+    async function uploadBulkCover(file) {
+        const fd = new FormData();
+        fd.append('cover', file, file.name || 'cover.jpg');
+        // api() gestisce l'errore: solleva un'eccezione con il messaggio del server.
+        const res = await api('api/upload-cover.php', { method: 'POST', body: fd });
+        if (!res || !res.path) throw new Error('Upload response missing the cover path');
+        return res.path;
+    }
+
+    function discardBulkChanges() {
+        // Scarta solo le scelte della finestra multipla: non tocca i pending preesistenti
+        // (es. modifiche già aperte nel pannello dettagli) né i dati già salvati su disco.
+        clearBulkCover();
+        renderTable();
+        toast('Bulk changes discarded', 'info', 'Bulk Edit');
+    }
+
     function openBulkModal() {
         if (state.selected.size === 0) {
             toast('No tracks selected', 'warning');
@@ -973,13 +1056,12 @@
         $('#bulkArtist').value = '';
         $('#bulkGenre').value = '';
         $('#bulkYear').value = '';
-        $('#bulkTrack').value = '';
-        $('#bulkTotal').value = '';
-        $('#bulkCoverLabel').textContent = 'Choose cover...';
+        clearBulkCover();
         bootstrap.Modal.getOrCreateInstance('#bulkModal').show();
     }
 
-    function applyBulk() {
+    async function applyBulk() {
+        if (isBusy()) return;
         const selected = state.selected;
         if (selected.size === 0) return;
 
@@ -988,20 +1070,44 @@
             ['artist', $('#bulkArtist').value.trim()],
             ['genre', $('#bulkGenre').value.trim()],
             ['year', $('#bulkYear').value.trim()],
-            ['track', $('#bulkTrack').value.trim()],
-            ['total', $('#bulkTotal').value.trim()],
         ].filter(([, v]) => v !== '');
+
+        let coverPath = '';
+        if (bulkDraft && bulkDraft.file) {
+            setBusy(true, 'Uploading cover...', bulkDraft.name);
+            try {
+                coverPath = await uploadBulkCover(bulkDraft.file);
+            } catch (err) {
+                // Copertina non salvata: nessun campo viene scritto, la finestra resta aperta.
+                setBusy(false);
+                toast(`Cover not applied: ${err.message}`, 'error', 'Bulk Edit');
+                updateBulkBtn();
+                return;
+            }
+            setBusy(false);
+        }
 
         let count = 0;
         for (const path of selected) {
             const pend = state.pending.get(path) || {};
             for (const [f, v] of fields) pend[f] = v;
+            if (coverPath) pend.cover = coverPath;
+            if (Object.keys(pend).length === 0) continue;
             state.pending.set(path, pend);
             count++;
         }
+        clearBulkCover();
+
+        if (count === 0) {
+            bootstrap.Modal.getInstance('#bulkModal').hide();
+            toast('Nothing to save', 'info', 'Bulk Edit');
+            return;
+        }
+
+        // Un solo salvataggio: applyBulk committa i pending, saveTracks esegue la chiamata.
+        // saveTracks segnala già successo/errore (anche il fallimento parziale della copertina).
+        await saveTracks([...selected]);
         bootstrap.Modal.getInstance('#bulkModal').hide();
-        renderTable();
-        toast(`Changes staged for ${count} tracks — press Save`, 'success', 'Bulk Edit');
     }
 
     /* ---------- Events ---------- */
@@ -1089,19 +1195,20 @@
             toggleSelect(cb.dataset.path);
         });
 
-        $('#saveAllBtn').addEventListener('click', () => {
-            saveTracks([...state.pending.keys()]);
-        });
-
         $('#bulkBtn').addEventListener('click', openBulkModal);
         $('#bulkApplyBtn').addEventListener('click', applyBulk);
+        $('#bulkCancelBtn').addEventListener('click', discardBulkChanges);
 
-        $('#bulkCoverBtn').addEventListener('click', () => {
-            const first = [...state.selected].map(findTrack).filter(Boolean)[0];
-            if (!first) return;
-            bootstrap.Modal.getInstance('#bulkModal').hide();
-            openCoverModal({ type: 'bulk', paths: [...state.selected] });
+        $('#bulkCoverPickBtn').addEventListener('click', () => {
+            $('#bulkCoverInput').click();
         });
+
+        $('#bulkCoverInput').addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (file) setBulkCoverFile(file);
+        });
+
+        $('#bulkCoverClearBtn').addEventListener('click', clearBulkCover);
 
         $('#coverApplyBtn').addEventListener('click', applyCover);
 

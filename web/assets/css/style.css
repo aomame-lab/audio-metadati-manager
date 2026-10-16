@@ -423,6 +423,72 @@ body {
 .badge-unsaved { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold-muted); }
 .badge-saving { background: var(--info); color: #0d0e11; border: 1px solid transparent; }
 .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); margin-right: 0.35rem; }
+/* Dark badges for action buttons (Edit Selected and Save) - consistent with dark theme */
+.badge-app-dark {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+}
+.badge-app-dark:hover {
+    background: var(--surface-3) !important;
+}
+.badge-app-dark:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+}
+
+/* ---------- Bulk edit: cover picker ---------- */
+.bulk-cover {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.bulk-cover-preview {
+    width: 96px;
+    height: 96px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+.bulk-cover-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.bulk-cover-preview .cover-placeholder {
+    text-align: center;
+}
+.bulk-cover-preview .cover-placeholder i {
+    font-size: 1.6rem;
+    color: var(--gold-muted);
+    display: block;
+    margin-bottom: 0.2rem;
+}
+.bulk-cover-preview .cover-placeholder span {
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+}
+
+.bulk-cover-side {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.35rem;
+}
+.bulk-cover-side .form-text {
+    margin-bottom: 0;
+}
 
 /* ---------- Empty state ---------- */
 .empty-state {

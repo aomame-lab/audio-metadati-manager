@@ -83,10 +83,6 @@
                 <button class="btn btn-outline-secondary btn-sm" type="button" id="bulkBtn">
                     <i class="bi bi-pencil-square me-1"></i>Edit Selected
                 </button>
-
-                <button class="btn btn-gold btn-sm" type="button" id="saveAllBtn" disabled>
-                    <i class="bi bi-cloud-arrow-up me-1"></i>Save <span id="unsavedCount" class="badge bg-dark-subtle ms-1">0</span>
-                </button>
             </div>
         </div>
 
@@ -276,27 +272,36 @@
                                 <label class="form-label" for="bulkYear">Year</label>
                                 <input type="number" class="form-control" id="bulkYear" min="1000" max="2100">
                             </div>
-                            <div class="col-6">
-                                <label class="form-label" for="bulkTrack">Track #</label>
-                                <input type="number" class="form-control" id="bulkTrack" min="1">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label" for="bulkTotal">Total tracks</label>
-                                <input type="number" class="form-control" id="bulkTotal" min="1">
-                            </div>
                             <div class="col-12">
-                                <label class="form-label">Cover</label>
-                                <button type="button" class="btn btn-outline-secondary btn-sm w-100 d-flex align-items-center justify-content-center gap-2" id="bulkCoverBtn">
-                                    <i class="bi bi-images"></i> <span id="bulkCoverLabel">Choose cover...</span>
-                                </button>
-                                <div class="form-text">The cover will be applied to all selected tracks when you save.</div>
+                                <label class="form-label" for="bulkCoverPickBtn">Cover</label>
+                                <div class="bulk-cover">
+                                    <div class="bulk-cover-preview" id="bulkCoverPreviewBox">
+                                        <div class="cover-placeholder" id="bulkCoverPlaceholder">
+                                            <i class="bi bi-image"></i><span>NO COVER</span>
+                                        </div>
+                                        <img id="bulkCoverPreview" alt="Selected cover preview" hidden>
+                                    </div>
+                                    <div class="bulk-cover-side">
+                                        <input type="file" id="bulkCoverInput" accept="image/jpeg,.jpg,.jpeg" hidden>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" id="bulkCoverPickBtn">
+                                                <i class="bi bi-folder2-open me-1"></i><span id="bulkCoverPickLabel">Choose image...</span>
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="bulkCoverClearBtn">
+                                                <i class="bi bi-x-lg me-1"></i>Clear
+                                            </button>
+                                        </div>
+                                        <div class="form-text text-truncate" id="bulkCoverLabel">No file selected.</div>
+                                    </div>
+                                </div>
+                                <div class="form-text">JPEG only. The cover is embedded into all selected tracks when you save.</div>
                             </div>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-gold" id="bulkApplyBtn"><i class="bi bi-check2-circle me-1"></i>Apply</button>
+                    <button type="button" class="btn btn-outline-secondary" id="bulkCancelBtn" data-bs-dismiss="modal">Annulla</button>
+                    <button type="button" class="btn btn-gold" id="bulkApplyBtn"><i class="bi bi-check2-circle me-1"></i>Salva modifiche</button>
                 </div>
             </div>
         </div>
