@@ -31,12 +31,18 @@
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* Altezza dell'header, unica sorgente per l'offset sticky della toolbar.
+       Il valore di fallback serve solo finche' syncHeaderHeight() non ha
+       misurato il DOM; da quel momento e' sempre aggiornato da un
+       ResizeObserver (evento, non polling). */
+    --app-header-h: 80px;
 }
 
 /* ---------- Toolbar ---------- */
 .app-toolbar {
     position: sticky;
-    top: 80px;
+    top: var(--app-header-h);
     z-index: 100;
     background: var(--bg);
     padding-top: 0.5rem;
@@ -46,7 +52,7 @@
 
 @media (max-width: 991.98px) {
     .app-toolbar {
-        top: 65px;
+        top: var(--app-header-h);
     }
 }
 
@@ -127,6 +133,19 @@ body {
 
 .navbar { padding: 0.6rem 0; }
 
+/* Riga dell'header. Il contenitore e' un vero flex container: senza questo i
+   suffissi order-lg-2 / order-lg-3 e ms-lg-auto dei figli non hanno alcun
+   effetto e gli elementi si impilano su piu' righe. Su lg restano tutti
+   sulla stessa riga; sotto lg il flex-wrap mette il mini player a tutta
+   larghezza sulla riga successiva. */
+.header-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    row-gap: 0.35rem;
+}
+
 .brand-mark {
     width: 50px; height: 50px;
     display: inline-flex; align-items: center; justify-content: center;
@@ -199,12 +218,28 @@ body {
     font-size: 0.875rem;
 }
 
-.input-group-path .form-control { border-radius: 0; }
-.input-group-path .input-group-text { border-radius: 0; }
-.input-group-path .btn { border-radius: 0; }
+/* .input-group-path era usata dal campo "percorso libreria" dell'header,
+   rimosso quando al suo posto e' comparso il mini player. */
 
 .search-wrap .input-group .form-control { border-right: 0; }
 .search-wrap .input-group .input-group-text { border-right: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+
+/* Il pulsante X e' l'ultimo figlio del .input-group anche quando hidden
+   (display:none non lo toglie dal DOM): Bootstrap gli applica quindi
+   margin-right:-1px e azzera il raggio destro del campo. Con la X nascosta
+   il campo restava senza bordo ne' angoli a destra e sembrava tagliato.
+   has-clear viene togglata da setSearchQuery() e chiude il gruppo in modo
+   coerente nei due stati. */
+/* Il selettore include l'elemento per pareggiare la specificita' di Bootstrap
+   (.input-group > :not(:last-child)... = 5 classi): a parita' vince style.css,
+   caricato dopo bootstrap.min.css. */
+.search-wrap .input-group input.form-control:not(.has-clear) {
+    margin-right: 0;
+    border-right: 1px solid var(--border);
+    border-top-right-radius: var(--radius-sm);
+    border-bottom-right-radius: var(--radius-sm);
+}
+
 .search-wrap .input-group .btn-clear {
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -214,6 +249,24 @@ body {
 }
 .search-wrap .input-group .btn-clear:hover { color: var(--text); }
 .search-wrap .input-group .btn-clear.hidden { display: none; }
+
+/* Disattiva la X nativa di input[type=search] (Chrome/Edge/Safari, motore
+   WebKit): senza questo compare insieme alla X personalizzata. */
+.search-wrap input[type="search"]::-webkit-search-cancel-button,
+.search-wrap input[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+}
+/* Firefox: nessuna X nativa su input[type=search]; dichiarazione difensiva. */
+.search-wrap input[type="search"] {
+    -moz-appearance: textfield;
+}
+.search-wrap input[type="search"]::-ms-clear,
+.search-wrap input[type="search"]::-ms-reveal {
+    display: none;
+    width: 0;
+    height: 0;
+}
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -751,279 +804,6 @@ body {
 @media (max-width: 575.98px) {
     .app-footer { justify-content: center; text-align: center; }
     .track-meta { max-width: 120px; }
-    .player-track-info { display: none; }
-    .player-controls { order: -1; }
-    .audio-player-inner { padding: 0.5rem 0.75rem; }
-}
-
-/* ---------- Audio Player ---------- */
-.audio-player-panel {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1030;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
-}
-
-.app-main {
-    padding-bottom: 110px;
-}
-
-@media (max-width: 575.98px) {
-    .app-main { padding-bottom: 100px; }
-}
-
-.audio-player-inner {
-    display: grid;
-    grid-template-columns: 220px 1fr auto auto;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.5rem 1.25rem;
-    max-width: 1400px;
-    margin: 0 auto;
-}
-
-.player-track-info {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    min-width: 0;
-}
-
-.player-cover {
-    width: 48px;
-    height: 48px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    background: var(--surface-3);
-    border: 1px solid var(--border);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.player-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.player-cover .cover-placeholder { color: var(--gold-muted); font-size: 1.2rem; }
-
-.player-meta { min-width: 0; }
-.player-title {
-    font-weight: 500;
-    color: var(--text);
-    font-size: 0.85rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.player-artist {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.player-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    justify-content: center;
-}
-
-.btn-player {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.1rem;
-    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.btn-player:hover {
-    color: var(--gold);
-    border-color: var(--gold-muted);
-    background: var(--gold-soft);
-}
-.btn-player.btn-play {
-    width: 48px;
-    height: 48px;
-    font-size: 1.3rem;
-    background: var(--gold);
-    border-color: var(--gold);
-    color: #141414;
-}
-.btn-player.btn-play:hover {
-    background: #d9b45f;
-    border-color: #d9b45f;
-    color: #141414;
-}
-
-.player-progress-wrap {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    min-width: 0;
-}
-
-.player-time {
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--text-faint);
-    min-width: 42px;
-    text-align: right;
-}
-.player-time:last-child { text-align: left; }
-
-.player-progress {
-    flex: 1;
-    height: 6px;
-    background: var(--surface-3);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    cursor: pointer;
-    position: relative;
-    min-width: 120px;
-}
-.player-progress:hover .player-progress-handle { opacity: 1; }
-.player-progress:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 3px; }
-
-.player-progress-fill {
-    height: 100%;
-    background: var(--gold);
-    border-radius: 3px 0 0 3px;
-    width: 0%;
-    transition: width 0.1s linear;
-}
-
-.player-progress-handle {
-    position: absolute;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 14px;
-    height: 14px;
-    background: var(--gold);
-    border: 2px solid var(--bg);
-    border-radius: 50%;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-    pointer-events: none;
-}
-
-.player-volume-wrap {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.btn-volume {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    border-radius: var(--radius-sm);
-    width: 36px;
-    height: 36px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.btn-volume:hover {
-    color: var(--gold);
-    border-color: var(--gold-muted);
-    background: var(--gold-soft);
-}
-
-.player-volume-slider {
-    width: 100px;
-    max-width: 120px;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: var(--surface-3);
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    cursor: pointer;
-}
-.player-volume-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    background: var(--gold);
-    border: 2px solid var(--bg);
-    border-radius: 50%;
-    cursor: pointer;
-    transition: transform 0.1s ease;
-}
-.player-volume-slider::-webkit-slider-thumb:hover { transform: scale(1.1); }
-.player-volume-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    background: var(--gold);
-    border: 2px solid var(--bg);
-    border-radius: 50%;
-    cursor: pointer;
-}
-/* ============================================================
-   Library view — Artist -> Album -> Track
-   ============================================================ */
-
-.library-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
-}
-.library-header-info { min-width: 0; }
-.library-title {
-    font-size: 1.35rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: var(--text);
-    margin: 0 0 0.2rem;
-}
-.library-title .bi { color: var(--gold); margin-right: 0.4rem; }
-/* Riepilogo compatto dentro il badge #trackCountBadge dell'header. */
-.library-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.7rem;
-    line-height: 1.35;
-    white-space: nowrap;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-variant-numeric: tabular-nums;
-}
-.library-badge .bi { flex-shrink: 0; }
-.library-stats-inline {
-    font-size: inherit;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.library-stats-inline .stat-sep { color: var(--text-faint); margin: 0 0.25rem; }
-.library-stats-inline .stat-strong { color: var(--gold); font-weight: 600; }
-.library-stats-inline .stat-dirty { color: var(--gold); font-weight: 600; }
-
-/* Su schermi stretti il riepilogo si riduce invece di occupare una riga tutta sua. */
-@media (max-width: 575.98px) {
-    .library-badge { font-size: 0.64rem; padding: 0.35em 0.55em; }
-    .library-stats-inline .stat-sep { margin: 0 0.15rem; }
-}
-
-@media (max-width: 991.98px) {
-    .library-header { flex-direction: column; align-items: stretch; }
-    .library-header-search .search-wrap { max-width: none !important; }
 }
 
 /* ---------- View toggle active state ---------- */
@@ -1315,7 +1095,8 @@ body {
 }
 .track-list-compact .tv-fmt { width: 52px; }
 .track-list-compact .tv-status { width: 88px; text-align: right; }
-.track-list-compact .tv-actions { width: 62px; text-align: right; white-space: nowrap; }
+.track-list-compact .tv-actions { width: 92px; text-align: right; white-space: nowrap; }
+.track-list-compact .tv-actions .tv-play-btn { margin-right: 0.25rem; }
 
 .tv-fmt-badge {
     font-size: 0.6rem;
@@ -1365,4 +1146,380 @@ body {
     color: var(--text);
     border-radius: 2px;
     padding: 0 0.1rem;
+}
+
+/* ---------- Play buttons in the library views ----------
+   The play button of a track and the play button of an album drive the SAME
+   audio element of the header mini player: no second player. */
+.album-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.album-title-row .album-title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.album-play-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    padding: 0;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.album-play-btn:hover:not(:disabled) {
+    color: var(--gold);
+    border-color: var(--gold-muted);
+    background: var(--gold-soft);
+}
+.album-play-btn:disabled { opacity: 0.35; cursor: default; }
+
+.tv-play-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    padding: 0;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.tv-play-btn:hover {
+    color: var(--gold);
+    border-color: var(--gold-muted);
+    background: var(--gold-soft);
+}
+
+/* Riga della traccia in riproduzione: evidenziazione discreta, appena un
+   bordo oro a sinistra, senza rompere i colori della tabella. */
+.track-list-compact tr.is-playing td:first-child,
+.table-tracks tbody tr.track-row.is-playing td:first-child {
+    box-shadow: inset 2px 0 0 var(--gold);
+}
+
+.track-list-compact tr.is-playing .tv-title,
+.table-tracks tbody tr.track-row.is-playing .track-title {
+    color: var(--gold);
+}
+/* ---------- Mini player (header) ----------
+   Stessa sorgente audio e stesso playerState dei pulsanti Play delle tracce
+   e degli album: e' solo una vista compatta, non un secondo player. */
+.mini-player {
+    display: flex;
+    align-items: center;
+    /* Spazio ridotto fra equalizer, titolo e controlli: il player resta un
+       blocco compatto e non una card. */
+    gap: 0.4rem;
+    min-width: 0;
+    /* Piccolo componente integrato nell'header: bordo sottile e discreto
+       (lo stesso var(--border) di panel, album-card e btn-icon), raggio
+       leggero e padding compatto. */
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    padding: 0.25rem 0.45rem;
+    /* Larghezza STABILE: il box non cambia dimensione quando il titolo e'
+       corto o lunghissimo, quindi l'header non "salta" e un titolo lungo non
+       lo allarga. Si restringe da solo se lo spazio nella riga non basta. */
+    flex: 0 1 380px;
+    max-width: 380px;
+}
+
+.mini-meta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    flex: 1 1 auto;
+    line-height: 1.2;
+}
+
+.mini-title {
+    color: var(--text);
+    font-size: 0.78rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Stato vuoto: testo discreto, nessun titolo. */
+.mini-title.is-empty {
+    color: var(--text-faint);
+    font-weight: 400;
+    font-style: italic;
+}
+
+.mini-artist {
+    color: var(--text-faint);
+    font-size: 0.68rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- Controlli: cerchio con bordo, come i bottoni del player rimosso ---
+   Il gap fra i pulsanti NON viene ridotto: restano comodi da cliccare. */
+.mini-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+}
+
+.mini-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    padding: 0;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.mini-btn:hover:not(:disabled) {
+    color: var(--gold);
+    border-color: var(--gold-muted);
+    background: var(--gold-soft);
+}
+.mini-btn:disabled { opacity: 0.35; cursor: default; }
+
+.mini-btn-play {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+    color: var(--gold);
+    border-color: var(--border);
+}
+.mini-btn-play:hover:not(:disabled) { background: var(--gold-soft); }
+
+/* --- Animazione a barre (equalizzatore) ---
+   Le barre sono statiche e accese in modo tenue quando non si riproduce:
+   l'animazione parte SOLO con .is-playing sull'elemento contenitore, che il
+   JS imposta dagli eventi play/pause/ended/error. Solo transform: nessun
+   layout, nessun reflow. prefers-reduced-motion e' gia' gestito globalmente
+   (vedi blocco "Focus & accessibility"): le barre restano statiche. */
+.mini-eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 16px;
+    flex-shrink: 0;
+    /* Centrato verticalmente rispetto al blocco titolo/artista, cosi' le barre
+       restano allineate al testo anche quando l'artista e' nascosto. */
+    align-self: center;
+}
+
+.mini-eq > span {
+    display: block;
+    width: 2px;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--gold-muted);
+    transform: scaleY(0.35);
+    transform-origin: bottom;
+    opacity: 0.55;
+    transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.mini-eq > span:nth-child(1) { height: 45%; transform: scaleY(0.6); }
+.mini-eq > span:nth-child(2) { height: 80%; transform: scaleY(0.9); }
+.mini-eq > span:nth-child(3) { height: 100%; transform: scaleY(0.5); }
+.mini-eq > span:nth-child(4) { height: 65%; transform: scaleY(0.75); }
+
+.mini-player.is-playing .mini-eq > span {
+    background: var(--gold);
+    opacity: 1;
+    animation: mini-eq-bounce 0.9s ease-in-out infinite;
+}
+.mini-player.is-playing .mini-eq > span:nth-child(1) { animation-delay: 0s; }
+.mini-player.is-playing .mini-eq > span:nth-child(2) { animation-delay: 0.18s; }
+.mini-player.is-playing .mini-eq > span:nth-child(3) { animation-delay: 0.36s; }
+.mini-player.is-playing .mini-eq > span:nth-child(4) { animation-delay: 0.54s; }
+
+@keyframes mini-eq-bounce {
+    0%, 100% { transform: scaleY(0.25); }
+    50%      { transform: scaleY(1); }
+}
+
+/* Su schermi stretti l'artista sparisce e le barre si accorciano: resta
+   sempre leggibile il titolo, che e' l'informazione utile.
+   Il mini player si mette in ordine subito dopo il brand, cosi' l'header
+   resta su due righe invece che tre (il badge e il reload vanno a capo). */
+@media (max-width: 575.98px) {
+    .header-row { column-gap: 0.5rem; row-gap: 0.4rem; }
+    /* Su un telefono il mini player prende una riga tutta sua: i tre
+       controlli e l'equalizer occupano ~120px e il titolo deve restare
+       leggibile, quindi condividere la riga con brand e badge non basta.
+       L'header resta a due righe: riga 1 brand + badge + reload, riga 2 il
+       mini player. */
+    .mini-player { order: 3; flex: 1 1 100%; max-width: 100%; width: auto;
+                   gap: 0.4rem; padding: 0.25rem 0.45rem; }
+    .header-row > #headerActions { order: 2; }
+    /* Base zero: il brand non spinge mai a capo il badge, cresce solo con lo
+       spazio libero della riga e il suo testo si accorcia con i puntini. */
+    .navbar-brand { flex: 1 1 0; min-width: 0; }
+    .brand-mark { flex-shrink: 0; }
+    .brand-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mini-artist { display: none; }
+    .mini-eq { height: 14px; gap: 1.5px; }
+    .mini-title { font-size: 0.74rem; }
+}
+
+/* ---------- Music folders dialog ---------- */
+/* Due pannelli affiancati (registrate | esplora) che si impilano sotto lg.
+   Stesso linguaggio di .panel / .panel-title del resto dell'app. */
+.folder-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.folder-panel-head {
+    padding: 0.6rem 0.85rem;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.folder-panel-body {
+    padding: 0.85rem;
+    overflow-y: auto;
+    /* Limita l'altezza dei pannelli dentro il modale scorrevole, così la
+       lista delle cartelle non cresce indefinitamente su biblioteche grandi. */
+    max-height: 46vh;
+}
+
+/* Voce di una cartella registrata: etichetta, percorso, stato, rimozione. */
+.folder-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    margin-bottom: 0.5rem;
+}
+.folder-item.is-missing { border-color: var(--danger); background: var(--danger-bg); }
+
+.folder-item-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
+
+.folder-item-label {
+    color: var(--text);
+    font-size: 0.85rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-item-path {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-state {
+    flex-shrink: 0;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 0.18rem 0.4rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    color: var(--text-faint);
+}
+.folder-state.ok { color: var(--success); border-color: var(--success); background: var(--success-bg); }
+.folder-state.err { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
+
+/* Pulsante icona compatto per le azioni di riga (rimozione cartella). */
+.btn-icon-sm { width: 28px; height: 28px; font-size: 0.75rem; flex-shrink: 0; }
+
+/* Percorso corrente dentro la root selezionata. */
+.folder-path {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 0.3rem 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Elenco directory: una riga per cartella, navigazione incrementale. */
+.folder-browser {
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    max-height: 30vh;
+    overflow-y: auto;
+}
+
+.folder-dir {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.folder-dir:last-child { border-bottom: 0; }
+.folder-dir:hover { background: var(--gold-soft); color: var(--gold); }
+.folder-dir:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.folder-dir .bi-folder-fill { color: var(--gold-muted); flex-shrink: 0; }
+.folder-dir:hover .bi-folder-fill { color: var(--gold); }
+
+.folder-dir-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-dir-go { flex-shrink: 0; color: var(--text-faint); font-size: 0.7rem; }
+
+/* Su schermi piccoli il dialog resta usabile: pannelli più bassi, footer che
+   va a capo e i pulsanti occupano la larghezza disponibile. */
+@media (max-width: 575.98px) {
+    .folder-panel-body { max-height: 34vh; }
+    .folder-browser { max-height: 26vh; }
+    #foldersModal .modal-footer .btn { flex: 1 1 auto; }
 }

@@ -17,6 +17,21 @@
  *   export AUDIO_LIBRARY_OVERRIDE=/path/to/your/music
  */
 
+// Direct access guard. This file lives inside the served document root but it
+// is an include, not an endpoint: answering with an empty "200 text/html" is
+// indistinguishable from a silent failure for a client calling fetch().json(),
+// so answer with an explicit JSON error instead. Declared here (and in the
+// other include-only files) instead of in a shared helper because a shared
+// helper would be reachable in exactly the same way.
+if (isset($_SERVER['SCRIPT_FILENAME'])
+    && @realpath((string) $_SERVER['SCRIPT_FILENAME']) !== false
+    && @realpath((string) $_SERVER['SCRIPT_FILENAME']) === @realpath(__FILE__)) {
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'error' => 'Internal file, not an API endpoint']);
+    exit;
+}
+
 $localConfigFile = __DIR__ . '/config.local.php';
 
 if (is_file($localConfigFile)) {

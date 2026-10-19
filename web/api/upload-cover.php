@@ -8,12 +8,13 @@
  *
  * Why the file is written inside the library:
  * bulk-update.php validates the "cover" argument with resolve_in_library(),
- * which only accepts paths that already exist inside the library root.
- * Storing the upload under "<library>/.covers/" keeps the existing security
- * checks untouched instead of widening the paths accepted by the API.
- * The directory name starts with a dot and find_covers() only scans the
- * folder of each audio file, so these temporary images are never offered as
- * source covers nor modified by the application.
+ * which only accepts paths that already exist inside a library root. Storing
+ * the upload under "<root>/.covers/" keeps the existing security checks
+ * untouched instead of widening the paths accepted by the API. With several
+ * mounts the first WRITABLE root is used, so a read-only secondary mount never
+ * breaks the bulk cover upload. The directory name starts with a dot and
+ * find_covers() only scans the folder of each audio file, so these temporary
+ * images are never offered as source covers nor modified by the application.
  *
  * Response: { success:true, path:"/abs/path.jpg", name:"original.jpg" }
  *           { success:false, error:"..." }
@@ -44,8 +45,8 @@ if ((int) $field['size'] <= 0 || (int) $field['size'] > COVER_UPLOAD_MAX_BYTES) 
     json_out(['success' => false, 'error' => 'The image is empty or too large (max 10 MB)'], 400);
 }
 
-$root = library_root();
-if ($root === '') {
+$root = cover_storage_root();
+if ($root === null) {
     json_out(['success' => false, 'error' => 'No library configured: cannot store the cover'], 400);
 }
 

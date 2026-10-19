@@ -6,15 +6,31 @@
  *  - JSON response headers
  *  - Python interpreter detection (project venv with mutagen)
  *  - safe execution of commands against python/comm.py
- *  - library path validation
+ *  - library path validation across every authorized music root
+ *  - persistent list of the music folders registered by the user
  */
 
 declare(strict_types=1);
+
+// Direct access guard: this file is the shared include of every endpoint, not
+// an endpoint itself. See the same guard in web/config.php for the rationale:
+// an empty "200" is the worst possible failure signature for the browser,
+// because response.json() rejects it without saying anything useful.
+if (isset($_SERVER['SCRIPT_FILENAME'])
+    && @realpath((string) $_SERVER['SCRIPT_FILENAME']) !== false
+    && @realpath((string) $_SERVER['SCRIPT_FILENAME']) === @realpath(__FILE__)) {
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'error' => 'Internal file, not an API endpoint']);
+    exit;
+}
 
 define('PROJECT_ROOT', dirname(__DIR__, 2));
 define('COMM_SCRIPT', PROJECT_ROOT . '/python/comm.py');
 
 require_once PROJECT_ROOT . '/web/config.php';
+require_once __DIR__ . '/library-roots.php';
+require_once __DIR__ . '/library-folders.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -75,27 +91,23 @@ function run_python(array $args): array
 /**
  * Return the configured music library root (from the environment override
  * or the local configuration file). Returns an empty string when unset.
+ * This is the historical single root and stays the default of the API.
  */
 function library_root(): string
 {
-    $root = getenv('AUDIO_LIBRARY_OVERRIDE');
-    if ($root === false || $root === '') {
-        $root = defined('AUDIO_LIBRARY_PATH') ? AUDIO_LIBRARY_PATH : '';
-    }
-    if ($root === '' || $root === false) {
-        return '';
-    }
-    $real = realpath($root);
-    return $real !== false ? $real : $root;
+    return music_root_primary_path();
 }
 
 /**
  * Resolve a path and verify that it exists.
  *
- * When a library root is configured, the path must live inside it (this
- * blocks path traversal outside the music library). When no root is
- * configured yet, any existing path is accepted so that a new user can
- * point the application at their music directory directly.
+ * A path is accepted when it lives inside ANY configured music root (the
+ * primary one plus the additional mounts), which keeps the previous behaviour
+ * for single-root installations and widens it to the new multi-folder ones.
+ *
+ * When no root can be resolved at all (no root configured, or a configured
+ * root that does not exist), any existing path is accepted, exactly as before:
+ * a brand new user can point the application at their music directory.
  */
 function resolve_in_library(?string $path): ?string
 {
@@ -107,22 +119,33 @@ function resolve_in_library(?string $path): ?string
         return null;
     }
 
-    $root = library_root();
-    if ($root === '') {
-        return $real;
+    $anyRootResolved = false;
+    foreach (music_roots() as $root) {
+        $rootReal = realpath($root['path']);
+        if ($rootReal === false || $rootReal === '') {
+            continue;
+        }
+        $anyRootResolved = true;
+        if (music_path_in_root($rootReal, $real)) {
+            return $real;
+        }
     }
 
-    $rootReal = realpath($root);
-    if ($rootReal === false || $rootReal === '') {
-        return $real;
-    }
+    return $anyRootResolved ? null : $real;
+}
 
-    if ($real === $rootReal) {
-        return $real;
-    }
-    $rootNormalized = rtrim($rootReal, DIRECTORY_SEPARATOR);
-    if ($rootNormalized !== '' && strpos($real, $rootNormalized . DIRECTORY_SEPARATOR) === 0) {
-        return $real;
+/**
+ * Directory where temporary uploaded covers are stored.
+ * The first writable root wins, so a read-only secondary mount never breaks
+ * the bulk cover upload. Returns null when nothing is writable.
+ */
+function cover_storage_root(): ?string
+{
+    foreach (music_roots() as $root) {
+        $real = realpath($root['path']);
+        if ($real !== false && is_dir($real) && is_writable($real)) {
+            return $real;
+        }
     }
     return null;
 }

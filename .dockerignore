@@ -10,6 +10,8 @@ screenshots
 web/config.local.php
 .env
 music
+data
+tests
 *.mp3
 *.flac
 *.m4a

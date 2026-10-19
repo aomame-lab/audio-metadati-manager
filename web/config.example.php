@@ -20,4 +20,16 @@
  * directly in the web interface.
  */
 
+// Direct access guard: this file is a template, not an endpoint. It lives
+// inside the served document root, so answering with an empty "200 text/html"
+// would look like a broken application to anybody who opens the URL.
+if (isset($_SERVER['SCRIPT_FILENAME'])
+    && @realpath((string) $_SERVER['SCRIPT_FILENAME']) !== false
+    && @realpath((string) $_SERVER['SCRIPT_FILENAME']) === @realpath(__FILE__)) {
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'error' => 'Internal file, not an API endpoint']);
+    exit;
+}
+
 define('AUDIO_LIBRARY_PATH', '/path/to/your/music');

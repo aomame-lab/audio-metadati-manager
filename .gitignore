@@ -26,6 +26,10 @@ config.local.php
 .env.local
 !.env.example
 
+# Runtime application data (list of registered music folders).
+# It lives in the "audio-data" Docker volume; the local copy is machine state.
+data/
+
 # Personal tooling configuration
 opencode.json
 opencode.jsonc

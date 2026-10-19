@@ -9,6 +9,8 @@
     /* ---------- State ---------- */
     const state = {
         libraryPath: '',
+        roots: [],               // authorized mounts [{id,label,path,primary,available}]
+        folders: [],             // registered music folders (persisted server side)
         tracks: [],
         pending: new Map(),      // path -> { field: value, cover?: path|'__remove__' }
         selected: new Set(),
@@ -23,11 +25,21 @@
         totals: { artists: 0, albums: 0 }, // computed on the WHOLE library, not on filters
     };
 
+    /* ---------- Music folders dialog state ---------- */
+    const foldersState = {
+        root: '',        // selected root id
+        rel: '',         // current relative path inside that root
+        target: null,    // directory the user is about to add {name, rel}
+        loading: false,  // guards against double clicks while a request is running
+    };
+
     /* ---------- Audio Player State ---------- */
     const playerState = {
         audio: null,
         currentIndex: -1,
-        playlist: [],
+        playlist: [],          // navigation sequence walked by Next/Previous
+        sequenceKind: 'library',   // 'library' (visible list) | 'album'
+        sequenceId: '',            // key of the album, when the sequence is an album
         isPlaying: false,
         volume: 1,
         muted: false,
@@ -62,57 +74,92 @@
         return state.busy;
     }
 
-    /* ---------- Audio Player ---------- */
+    /* ---------- Header height ----------
+       The toolbar is sticky right below the header, and the header wraps to
+       1, 2 or 3 rows depending on the width. The real height is published to
+       a CSS variable instead of being hardcoded in two magic numbers.
+       ResizeObserver is event driven: there is no polling here. */
+    function syncHeaderHeight() {
+        const header = document.querySelector('.app-header');
+        if (!header) return;
+        const apply = () => {
+            const height = Math.round(header.getBoundingClientRect().height);
+            if (height > 0) {
+                document.documentElement.style.setProperty('--app-header-h', height + 'px');
+            }
+        };
+        apply();
+        if (typeof ResizeObserver === 'function') {
+            new ResizeObserver(apply).observe(header);
+        } else {
+            window.addEventListener('resize', apply);
+        }
+    }
+
+    /* ---------- Audio Player ----------
+       The engine: ONE <audio> element and one playerState, shared by the
+       header mini player and by the play buttons of the tracks and of the
+       albums. The fixed player at the bottom of the page has been removed:
+       the header mini player is the only playback interface. */
     function initPlayer() {
         const audio = new Audio();
         audio.preload = 'metadata';
         audio.volume = playerState.volume;
         playerState.audio = audio;
 
-        audio.addEventListener('loadedmetadata', () => {
-            updatePlayerDuration();
-            updatePlayerProgress();
-        });
-        audio.addEventListener('timeupdate', () => {
-            updatePlayerProgress();
-        });
         audio.addEventListener('ended', () => {
             playNext();
         });
         audio.addEventListener('play', () => {
             playerState.isPlaying = true;
-            updatePlayPauseBtn();
+            updatePlaybackUi();
         });
         audio.addEventListener('pause', () => {
             playerState.isPlaying = false;
-            updatePlayPauseBtn();
+            updatePlaybackUi();
         });
         audio.addEventListener('error', (e) => {
             console.error('Audio error:', e);
             toast('Playback error', 'error');
             playerState.isPlaying = false;
-            updatePlayPauseBtn();
+            updatePlaybackUi();
         });
 
-        $('#playerPlayPause').addEventListener('click', togglePlayPause);
-        $('#playerNext').addEventListener('click', playNext);
-        $('#playerPrev').addEventListener('click', playPrev);
-
-        const progressEl = $('#playerProgress');
-        progressEl.addEventListener('click', (e) => seekProgress(e));
-        progressEl.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowRight') seekRelative(5);
-            else if (e.key === 'ArrowLeft') seekRelative(-5);
-        });
-
-        $('#playerVolume').addEventListener('input', (e) => setVolume(e.target.value));
-        $('#playerVolumeBtn').addEventListener('click', toggleMute);
+        // Mini player (header): same audio element, same handlers, no polling.
+        $('#miniPlayPauseBtn').addEventListener('click', togglePlayPause);
+        $('#miniNextBtn').addEventListener('click', playNext);
+        $('#miniPrevBtn').addEventListener('click', playPrev);
+        updateMiniPlayerMeta(null);
+        updatePlaybackUi();
     }
+
+    /* ---------- Playback sequence ----------
+       playerState.playlist is the sequence Next/Previous walk through. It is
+       rebuilt every time a track is started, so it always matches the context
+       the user started from:
+         - 'library': the tracks visible in the active view, in view order;
+         - 'album':   the tracks of one album, in album order.
+       The identifier of the album is kept in sequenceId, so the album button
+       can show the pause state while its own album is playing. */
 
     function buildPlaylistFromVisible(startIndex = 0) {
         const list = visibleTracks();
         playerState.playlist = list.map(t => t.path);
+        playerState.sequenceKind = 'library';
+        playerState.sequenceId = '';
         playerState.currentIndex = Math.max(0, Math.min(startIndex, playerState.playlist.length - 1));
+    }
+
+    function buildPlaylistFromAlbum(tracks, albumId) {
+        playerState.playlist = tracks.map(t => t.path);
+        playerState.sequenceKind = 'album';
+        playerState.sequenceId = albumId || '';
+        playerState.currentIndex = 0;
+    }
+
+    /** Tracks of an album in album order (track number, then file name). */
+    function albumTracksInOrder(album) {
+        return sortTracks(album.tracks);
     }
 
     function loadTrack(index) {
@@ -127,13 +174,17 @@
         audio.src = src;
         audio.load();
 
-        updatePlayerTrackInfo(track);
-        $('#audioPlayerPanel').classList.remove('d-none');
+        updateMiniPlayerMeta(track);
+        updatePlaybackUi();
     }
 
     function playTrack(index) {
         loadTrack(index);
         playerState.audio.play().catch(() => {
+            // play() can be refused (policy, removed file): no "play" event will
+            // arrive, so the state is forced back here instead of getting stuck.
+            playerState.isPlaying = false;
+            updatePlaybackUi();
         });
     }
 
@@ -151,7 +202,10 @@
         if (playerState.isPlaying) {
             audio.pause();
         } else {
-            audio.play().catch(() => {});
+            audio.play().catch(() => {
+                playerState.isPlaying = false;
+                updatePlaybackUi();
+            });
         }
     }
 
@@ -167,105 +221,154 @@
         playTrack(prev);
     }
 
-    function seekProgress(e) {
-        const audio = playerState.audio;
-        if (!audio.duration) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        audio.currentTime = pct * audio.duration;
+
+    /* ---------- Playback UI ----------
+       One entry point for everything the playback touches: the header mini
+       player, the play button of every track and the play button of every
+       album. It is called from the real audio events (play, pause, ended,
+       error), when a track is loaded and when the view is rendered. */
+    function updatePlaybackUi() {
+        updateMiniPlayerState();
+        updateRowPlayButtons();
+        updatePlayingHighlight();
     }
 
-    function seekRelative(seconds) {
+    /* ---------- Mini player (header) ----------
+       It is a view of the SAME <audio> element and of the same playerState as
+       the play buttons of the tracks and of the albums: no second player, no
+       polling. Everything is driven by the real audio events already wired in
+       initPlayer(). */
+    const MINI_EMPTY_LABEL = 'Nessuna traccia in riproduzione';
+
+    /** True when a track is loaded in the shared audio element. */
+    function miniHasTrack() {
         const audio = playerState.audio;
-        if (!audio.duration) return;
-        audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+        return !!(audio && audio.src && playerState.playlist.length > 0);
     }
 
-    function setVolume(value) {
-        const audio = playerState.audio;
-        const vol = Math.max(0, Math.min(1, parseFloat(value)));
-        playerState.volume = vol;
-        playerState.muted = vol === 0;
-        audio.volume = vol;
-        updateVolumeUI();
-    }
+    /** Title + artist of the loaded track (called when the track changes). */
+    function updateMiniPlayerMeta(track) {
+        const titleEl = $('#miniTitle');
+        const artistEl = $('#miniArtist');
+        if (!titleEl || !artistEl) return;
 
-    function toggleMute() {
-        if (playerState.muted || playerState.volume === 0) {
-            setVolume(playerState.volume || 1);
-        } else {
-            setVolume(0);
+        if (!track) {
+            titleEl.textContent = MINI_EMPTY_LABEL;
+            titleEl.title = MINI_EMPTY_LABEL;
+            titleEl.classList.add('is-empty');
+            artistEl.textContent = '';
+            artistEl.title = '';
+            return;
         }
-    }
 
-    function updatePlayerTrackInfo(track) {
         const m = mergedTrack(track);
-        $('#playerTitle').textContent = m.title || track.filename;
-        $('#playerArtist').textContent = m.artist || '—';
+        const title = m.title || track.filename || MINI_EMPTY_LABEL;
+        const artist = (m.artist || '').trim();
 
-        const coverUrl = effectiveCoverUrl(track);
-        const coverEl = $('#audioPlayerPanel .player-cover');
-        if (coverUrl) {
-            coverEl.innerHTML = `<img src="${esc(coverUrl)}" alt="" loading="lazy">`;
-        } else {
-            coverEl.innerHTML = '<div class="cover-placeholder"><i class="bi bi-music-note-beamed"></i></div>';
-        }
+        titleEl.textContent = title;
+        titleEl.title = title;            // full text on hover for long titles
+        titleEl.classList.toggle('is-empty', !m.title && !track.filename);
+        artistEl.textContent = artist;
+        artistEl.title = artist;
     }
 
-    function updatePlayerProgress() {
-        const audio = playerState.audio;
-        if (!audio.duration) return;
-        const pct = (audio.currentTime / audio.duration) * 100;
-        $('#playerProgressFill').style.width = `${pct}%`;
-        $('#playerProgressHandle').style.left = `${pct}%`;
-        $('#playerProgress').setAttribute('aria-valuenow', Math.round(pct));
-        $('#playerCurrentTime').textContent = formatDuration(audio.currentTime);
-    }
+    /**
+     * Disabled states + animation. Called from updatePlaybackUi(), i.e. on the
+     * real play/pause/ended/error events, and whenever the visible list
+     * changes (renderView) so "Play" follows the current filters.
+     */
+    function updateMiniPlayerState() {
+        const root = $('#miniPlayer');
+        if (!root) return;
 
-    function updatePlayerDuration() {
-        const audio = playerState.audio;
-        $('#playerDuration').textContent = formatDuration(audio.duration);
-    }
+        const hasTrack = miniHasTrack();
+        const canStart = hasTrack || visibleTracks().length > 0;
 
-    function updatePlayPauseBtn() {
-        const btn = $('#playerPlayPause');
-        const icon = btn.querySelector('i');
+        // With nothing loaded Play can still start the first visible track
+        // (togglePlayPause already does that), while Prev/Next need a playlist.
+        $('#miniPlayPauseBtn').disabled = !canStart;
+        $('#miniPrevBtn').disabled = !hasTrack;
+        $('#miniNextBtn').disabled = !hasTrack;
+
+        root.classList.toggle('is-playing', hasTrack && playerState.isPlaying);
+
+        const playBtn = $('#miniPlayPauseBtn');
+        const icon = playBtn.querySelector('i');
         if (playerState.isPlaying) {
             icon.className = 'bi bi-pause-fill';
-            btn.setAttribute('aria-label', 'Pause');
-            btn.title = 'Pause';
+            playBtn.setAttribute('aria-label', 'Pausa');
+            playBtn.title = 'Pausa';
         } else {
             icon.className = 'bi bi-play-fill';
-            btn.setAttribute('aria-label', 'Play');
-            btn.title = 'Play';
-        }
-        updateRowPlayButtons();
-    }
-
-    function updateVolumeUI() {
-        const vol = playerState.muted ? 0 : playerState.volume;
-        $('#playerVolume').value = vol;
-        const btn = $('#playerVolumeBtn');
-        const icon = btn.querySelector('i');
-        if (vol === 0) {
-            icon.className = 'bi bi-volume-mute-fill';
-            btn.setAttribute('aria-label', 'Unmute');
-        } else if (vol < 0.5) {
-            icon.className = 'bi bi-volume-down-fill';
-            btn.setAttribute('aria-label', 'Mute');
-        } else {
-            icon.className = 'bi bi-volume-up-fill';
-            btn.setAttribute('aria-label', 'Mute');
+            playBtn.setAttribute('aria-label', 'Riproduci');
+            playBtn.title = 'Riproduci';
         }
     }
 
-    function playTrackByPath(path) {
+    /**
+     * Start a single track.
+     *
+     * The navigation sequence follows the context of the button that was
+     * pressed: a track inside an album block keeps the sequence inside that
+     * album, a track of the flat list keeps the sequence of the visible
+     * library. In both cases Next/Previous stay meaningful.
+     */
+    function playTrackByPath(path, albumId) {
+        const album = albumId ? findAlbum(albumId) : null;
+        if (album && album.tracks.length) {
+            const ordered = albumTracksInOrder(album);
+            const idx = ordered.findIndex((t) => t.path === path);
+            if (idx >= 0) {
+                buildPlaylistFromAlbum(ordered, album.key);
+                playTrack(idx);
+                return;
+            }
+        }
+
         const list = visibleTracks();
-        const idx = list.findIndex(t => t.path === path);
-        if (idx >= 0) {
-            buildPlaylistFromVisible(idx);
-            playTrack(idx);
+        const idx = list.findIndex((t) => t.path === path);
+        if (idx < 0) {
+            toast('This track is not available', 'warning');
+            return;
         }
+        buildPlaylistFromVisible(idx);
+        playTrack(idx);
+    }
+
+    /**
+     * Play button of a track: pressing it while that very track is playing
+     * pauses it, like every other player.
+     */
+    function toggleTrack(path, albumId) {
+        if (currentPlayingPath() === path && playerState.isPlaying) {
+            playerState.audio.pause();
+            return;
+        }
+        playTrackByPath(path, albumId);
+    }
+
+    /**
+     * Play button of an album: starts the FIRST track of the album and keeps
+     * the sequence inside the album, so Next/Previous walk through it in
+     * album order. Pressing it again restarts the album from its first track.
+     */
+    function playAlbum(albumId) {
+        const album = findAlbum(albumId);
+        if (!album || !album.tracks.length) {
+            toast('This album has no tracks', 'warning');
+            return;
+        }
+        const ordered = albumTracksInOrder(album);
+        buildPlaylistFromAlbum(ordered, album.key);
+        playTrack(0);
+    }
+
+    /** Path of the file currently loaded in the shared audio element. */
+    function currentPlayingPath() {
+        const audio = playerState.audio;
+        if (!audio || !audio.src) return null;
+        const match = audio.src.match(/[?&]path=([^&]*)/);
+        return match ? decodeURIComponent(match[1]) : null;
     }
 
     function isBusy() {
@@ -282,7 +385,7 @@
         } else {
             overlay.classList.add('d-none');
         }
-        ['scanBtn', 'reloadBtn', 'bulkBtn', 'selectAllBtn', 'deselectAllBtn'].forEach((id) => {
+        ['reloadBtn', 'bulkBtn', 'selectAllBtn', 'deselectAllBtn', 'foldersBtn'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.disabled = on;
         });
@@ -345,6 +448,7 @@
         if (!res.ok || (data.success === false && !tolerateFailure)) {
             const err = new Error(data.error || data.detail || `Server error (HTTP ${res.status})`);
             err.detail = data.detail || '';
+            err.status = res.status;
             throw err;
         }
         return data;
@@ -417,13 +521,29 @@
         return list;
     }
 
+    /* ---------- Ricerca ---------- */
+    // Unico punto di ingresso per la ricerca: allinea campo, stato, visibilita' della X
+    // personalizzata e classe .has-clear (usata dal CSS per chiudere il gruppo a destra).
+    function setSearchQuery(value, render = true) {
+        const input = $('#searchInput');
+        const clearBtn = $('#clearSearchBtn');
+        const group = input ? input.closest('.input-group') : null;
+        state.searchQuery = value;
+        if (input && input.value !== value) input.value = value;
+        if (clearBtn) clearBtn.classList.toggle('hidden', !value);
+        if (group) group.classList.toggle('has-clear', !!value);
+        if (render) renderView();
+    }
+
     function updateCounts() {
         const list = visibleTracks();
         const label = `${list.length} of ${state.tracks.length} results`;
         $('#resultInfo').textContent = label;
         const treeInfo = $('#treeResultInfo');
         if (treeInfo) treeInfo.textContent = label;
-        $('#libraryInfo').textContent = state.libraryPath ? `Library: ${state.libraryPath}` : '';
+        $('#libraryInfo').textContent = state.folders.length > 0
+            ? `${state.folders.length} folder${state.folders.length === 1 ? '' : 's'}`
+            : (state.libraryPath ? `Library: ${state.libraryPath}` : '');
 
         // Riepilogo unico: vive nel badge #trackCountBadge dell'header, non in una
         // seconda area separata. I conteggi artisti/albumi sono sempre quelli
@@ -654,7 +774,14 @@ function buildLibraryModel() {
                     ${selN ? `<span class="album-cover-badge">${selN}</span>` : ''}
                 </button>
                 <div class="album-info">
-                    <span class="album-title ${album.unknown ? 'is-unknown' : ''}" title="${esc(album.name)}">${highlight(album.name, state.searchQuery)}</span>
+                    <div class="album-title-row">
+                        <span class="album-title ${album.unknown ? 'is-unknown' : ''}" title="${esc(album.name)}">${highlight(album.name, state.searchQuery)}</span>
+                        <button type="button" class="album-play-btn" data-action="play-album" data-album="${esc(album.key)}"
+                                data-label="${esc(album.name)}" aria-label="Riproduci album ${esc(album.name)}" title="Riproduci album"
+                                ${album.tracks.length ? '' : 'disabled'}>
+                            <i class="bi bi-play-fill"></i>
+                        </button>
+                    </div>
                     <span class="album-sub">
                         <span class="album-year">${year}</span>
                         <input type="checkbox" class="form-check-input album-check" data-album="${esc(album.key)}"
@@ -684,7 +811,7 @@ function buildLibraryModel() {
             </div>`;
     }
 
-    function trackRowHtml(track) {
+    function trackRowHtml(track, album) {
         const m = mergedTrack(track);
         const dirty = state.pending.has(track.path);
         const selected = state.selected.has(track.path);
@@ -706,6 +833,11 @@ function buildLibraryModel() {
                     <span class="tv-status-label">${dirty ? 'UNSAVED' : 'SAVED'}</span>
                 </td>
                 <td class="tv-actions">
+                    <button type="button" class="tv-play-btn" data-action="play-track" data-path="${esc(track.path)}"
+                            data-album="${album ? esc(album.key) : ''}" data-label="${esc(title)}"
+                            aria-label="Riproduci ${esc(title)}" title="Riproduci">
+                        <i class="bi bi-play-fill"></i>
+                    </button>
                     <button type="button" class="tv-edit-btn" data-action="edit-track" data-path="${esc(track.path)}"
                             aria-label="Edit ${esc(title)}" title="Edit metadata">
                         <i class="bi bi-pencil"></i>
@@ -718,7 +850,7 @@ function buildLibraryModel() {
         return `
             <table class="track-list-compact">
                 <caption class="visually-hidden">Tracks of ${esc(album.name)}</caption>
-                <tbody>${album.tracks.map(trackRowHtml).join('')}</tbody>
+                <tbody>${album.tracks.map((t) => trackRowHtml(t, album)).join('')}</tbody>
             </table>`;
     }
 
@@ -754,6 +886,7 @@ function buildLibraryModel() {
         if (body) body.innerHTML = trackTableHtml(album);
         el.dataset.filled = '1';
         syncIndeterminate(el);
+        updatePlaybackUi();
     }
 
     // Mostra/nasconde il blocco tracce di un album. L'attributo `hidden` e' lo stato
@@ -906,6 +1039,7 @@ for (const t of state.tracks) {
             renderTrackTable();
         }
         updateCounts();
+        updatePlaybackUi();
     }
 
     function syncViewUI() {
@@ -978,7 +1112,8 @@ for (const t of state.tracks) {
                     </td>
                     <td class="col-cover">${coverThumb(track)}</td>
                     <td class="col-play">
-                        <button type="button" class="btn-play-row" data-path="${esc(track.path)}" aria-label="${isPlaying ? 'Pause' : 'Play'} ${esc(m.title || track.filename)}" title="${isPlaying ? 'Pause' : 'Play'}">
+                        <button type="button" class="btn-play-row" data-path="${esc(track.path)}" data-label="${esc(m.title || track.filename)}"
+                                aria-label="${isPlaying ? 'Pausa' : 'Riproduci'} ${esc(m.title || track.filename)}" title="${isPlaying ? 'Pausa' : 'Riproduci'}">
                             <i class="bi ${isPlaying ? 'bi-pause-fill' : 'bi-play-fill'}"></i>
                         </button>
                     </td>
@@ -1001,25 +1136,56 @@ for (const t of state.tracks) {
         updateCounts();
     }
 
+    /**
+     * Play button of every track (flat list and album blocks) and of every
+     * album: the icon and the accessible name follow the real playback state.
+     */
     function updateRowPlayButtons() {
-        const playingPath = playerState.isPlaying && playerState.audio && playerState.audio.src
-            ? playerState.audio.src.split('path=')[1]?.split('&')[0]
-            : null;
-        const decodedPlayingPath = playingPath ? decodeURIComponent(playingPath) : null;
+        const playingPath = playerState.isPlaying ? currentPlayingPath() : null;
 
-        document.querySelectorAll('.btn-play-row').forEach((btn) => {
+        document.querySelectorAll('.btn-play-row, .tv-play-btn').forEach((btn) => {
             const path = btn.dataset.path;
-            const isPlaying = playerState.isPlaying && path === decodedPlayingPath;
+            const isPlaying = !!path && path === playingPath;
             const icon = btn.querySelector('i');
+            const name = btn.dataset.label || '';
             if (isPlaying) {
                 icon.className = 'bi bi-pause-fill';
-                btn.setAttribute('aria-label', `Pause ${btn.title.replace('Pause ', '').replace('Play ', '')}`);
-                btn.title = 'Pause';
+                btn.setAttribute('aria-label', 'Pausa ' + name);
+                btn.title = 'Pausa';
             } else {
                 icon.className = 'bi bi-play-fill';
-                btn.setAttribute('aria-label', `Play ${btn.title.replace('Pause ', '').replace('Play ', '')}`);
-                btn.title = 'Play';
+                btn.setAttribute('aria-label', 'Riproduci ' + name);
+                btn.title = 'Riproduci';
             }
+        });
+
+        document.querySelectorAll('.album-play-btn').forEach((btn) => {
+            const isPlaying = playerState.isPlaying
+                && playerState.sequenceKind === 'album'
+                && playerState.sequenceId === btn.dataset.album;
+            const icon = btn.querySelector('i');
+            const name = btn.dataset.label || '';
+            if (isPlaying) {
+                icon.className = 'bi bi-pause-fill';
+                btn.setAttribute('aria-label', 'Pausa album ' + name);
+                btn.title = 'Pausa album';
+            } else {
+                icon.className = 'bi bi-play-fill';
+                btn.setAttribute('aria-label', 'Riproduci album ' + name);
+                btn.title = 'Riproduci album';
+            }
+        });
+    }
+
+    /**
+     * Discreet highlight of the row of the track that is playing, in both
+     * views (flat list and album blocks).
+     */
+    function updatePlayingHighlight() {
+        const path = playerState.isPlaying ? currentPlayingPath() : null;
+        document.querySelectorAll('.track-row, [data-track-row]').forEach((row) => {
+            const rowPath = row.dataset.path || row.dataset.trackRow;
+            row.classList.toggle('is-playing', !!path && rowPath === path);
         });
     }
 
@@ -1311,9 +1477,18 @@ for (const t of state.tracks) {
     }
 
     /* ---------- Scan / load ---------- */
+    // The registered folders win over the plain root: as soon as at least one
+    // folder is registered, the library is the union of those folders and their
+    // tracks are merged (and de-duplicated) server side. Otherwise the single
+    // root returned by api/config.php is scanned, as it always was.
+    function useConfiguredFolders() {
+        return state.folders.length > 0;
+    }
+
     async function loadLibrary() {
+        const viaFolders = useConfiguredFolders();
         const path = state.libraryPath;
-        setBusy(true, 'Loading library...', path || '');
+        setBusy(true, 'Loading library...', viaFolders ? `${state.folders.length} folder(s)` : (path || ''));
         const tbody = $('#tracksBody');
         const tree = $('#artistTree');
         const loadingRow = '<tr><td colspan="12" class="text-center py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</td></tr>';
@@ -1322,7 +1497,9 @@ for (const t of state.tracks) {
             tree.innerHTML = '<div class="empty-state"><div class="spinner-border spinner-border-sm me-2" role="status"></div>Scanning...</div>';
         }
         try {
-            const res = await api('api/tracks.php?path=' + encodeURIComponent(path));
+            const res = viaFolders
+                ? await api('api/library.php')
+                : await api('api/tracks.php?path=' + encodeURIComponent(path));
             state.tracks = res.tracks || [];
             state.pending.clear();
             state.selected.clear();
@@ -1332,7 +1509,13 @@ for (const t of state.tracks) {
             computeTotals();
             activeDetailsContainer().innerHTML = '<div class="empty-state"><i class="bi bi-music-note-beamed"></i><p>Select a track to edit it</p></div>';
             renderView();
-            toast(`${state.tracks.length} tracks loaded`, 'success');
+            const unavailable = viaFolders ? (res.folders || []).filter((f) => !f.available) : [];
+            if (state.tracks.length === 0) {
+                toast(viaFolders ? 'No tracks found in the registered folders' : 'No tracks found in this folder', 'warning');
+            } else {
+                toast(`${state.tracks.length} tracks loaded`, 'success');
+            }
+            unavailable.forEach((f) => toast(`Folder not available: ${f.label || f.display}`, 'warning'));
             setApiStatus(true);
         } catch (err) {
             state.tracks = [];
@@ -1350,13 +1533,15 @@ for (const t of state.tracks) {
         try {
             const cfg = await api('api/config.php');
             state.libraryPath = cfg.library_path || '';
-            $('#libraryPath').value = state.libraryPath;
+            state.roots = cfg.roots || [];
+            state.folders = await fetchFolders();
+            updateFoldersBadge();
             setApiStatus(true);
         } catch (err) {
             setApiStatus(false);
             toast(`Server unreachable: ${err.message}`, 'error');
         }
-        if (state.libraryPath) {
+        if (useConfiguredFolders() || state.libraryPath) {
             await loadLibrary();
         } else {
             const emptyRow = '<tr><td colspan="12" class="text-center py-5"><div class="empty-state"><i class="bi bi-folder2-open"></i><p>Enter the library path and press SCAN.</p></div></td></tr>';
@@ -1372,6 +1557,236 @@ for (const t of state.tracks) {
         const el = $('#apiStatus');
         el.className = 'badge rounded-pill badge-soft ' + (ok ? 'ok' : 'err');
         el.innerHTML = `<span class="status-dot"></span>${ok ? 'server online' : 'server offline'}`;
+    }
+
+    /* ============================================================
+       Music folders dialog
+       The browser only ever sends a root identifier and a relative
+       path: absolute paths are never accepted server side, so this
+       dialog cannot read anything outside the mounted roots.
+       ============================================================ */
+
+    const foldersApi = {
+        list: () => api('api/folders.php'),
+        add: (root, path, label) => api('api/folders.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'add', root, path, label }),
+        }),
+        remove: (id) => api('api/folders.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'remove', id }),
+        }),
+        // tolerateFailure: an unreachable folder is a state to show inline,
+        // not an error that deserves a toast.
+        browse: (root, path) => api(`api/browse.php?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`, { tolerateFailure: true }),
+    };
+
+    async function fetchFolders() {
+        try {
+            const res = await foldersApi.list();
+            return res.folders || [];
+        } catch (err) {
+            return [];
+        }
+    }
+
+    function updateFoldersBadge() {
+        const badge = $('#foldersCountBadge');
+        if (!badge) return;
+        const n = state.folders.length;
+        badge.textContent = String(n);
+        badge.classList.toggle('d-none', n === 0);
+    }
+
+    function foldersStatus(message, tone = '') {
+        const el = $('#foldersStatus');
+        if (!el) return;
+        el.className = 'text-muted small' + (tone ? ` text-${tone}` : '');
+        el.textContent = message || '';
+    }
+
+    function renderFoldersList() {
+        const box = $('#foldersList');
+        if (!box) return;
+        if (state.folders.length === 0) {
+            box.innerHTML = '<div class="empty-state py-4"><i class="bi bi-folder-plus"></i><p>No folder registered yet.<br>Pick one on the right.</p></div>';
+            return;
+        }
+        box.innerHTML = state.folders.map((f) => `
+            <div class="folder-item ${f.available ? '' : 'is-missing'}">
+                <div class="folder-item-main">
+                    <span class="folder-item-label" title="${esc(f.label)}">${esc(f.label)}</span>
+                    <span class="folder-item-path" title="${esc(f.display)}">${esc(f.display)}</span>
+                </div>
+                <span class="folder-state ${f.available ? 'ok' : 'err'}"
+                      title="${esc(f.available ? 'Available' : (f.error || 'Not available'))}">
+                    ${f.available ? 'AVAILABLE' : 'MISSING'}
+                </span>
+                <button type="button" class="btn btn-icon btn-icon-sm" data-remove-folder="${esc(f.id)}"
+                        aria-label="Remove ${esc(f.label)}" title="Remove from the library">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+
+        box.querySelectorAll('[data-remove-folder]').forEach((btn) => {
+            btn.addEventListener('click', () => removeFolder(btn.dataset.removeFolder));
+        });
+    }
+
+    function renderRootsSelect() {
+        const select = $('#folderRootSelect');
+        if (!select) return;
+        const previous = foldersState.root;
+        select.innerHTML = state.roots.map((r) => {
+            const suffix = r.available ? (r.path || '') : 'not available';
+            return `<option value="${esc(r.id)}">${esc(r.label)} — ${esc(suffix)}</option>`;
+        }).join('');
+        if (state.roots.length === 0) {
+            foldersState.root = '';
+            select.innerHTML = '<option value="">No root configured</option>';
+            select.disabled = true;
+            return;
+        }
+        select.disabled = false;
+        const found = state.roots.some((r) => r.id === previous);
+        foldersState.root = found ? previous : state.roots[0].id;
+        select.value = foldersState.root;
+    }
+
+    async function browseInto(rel) {
+        const box = $('#folderBrowser');
+        const pathLabel = $('#folderCurrentPath');
+        const upBtn = $('#folderUpBtn');
+        if (!foldersState.root) {
+            box.innerHTML = '<div class="empty-state py-4"><i class="bi bi-exclamation-triangle"></i><p>No music folder is mounted.</p></div>';
+            if (pathLabel) pathLabel.textContent = '—';
+            if (upBtn) upBtn.disabled = true;
+            return;
+        }
+
+        foldersState.target = null;
+        foldersState.rel = rel || '';
+        if (pathLabel) pathLabel.textContent = '/' + (foldersState.root + '/' + foldersState.rel).replace(/\/+$/, '');
+        if (upBtn) upBtn.disabled = foldersState.rel === '';
+        box.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+
+        let res;
+        try {
+            res = await foldersApi.browse(foldersState.root, foldersState.rel);
+        } catch (err) {
+            box.innerHTML = `<div class="empty-state py-4"><i class="bi bi-exclamation-triangle"></i><p>${esc(err.message)}</p></div>`;
+            foldersStatus(err.message, 'danger');
+            return;
+        }
+
+        if (!res.success) {
+            box.innerHTML = `<div class="empty-state py-4"><i class="bi bi-exclamation-triangle"></i><p>${esc(res.error || 'Folder not available')}</p></div>`;
+            foldersStatus(res.error || 'Folder not available', 'danger');
+            return;
+        }
+
+        foldersStatus('');
+        const currentName = foldersState.rel === '' ? res.root.label : basename(foldersState.rel);
+        foldersState.target = { name: currentName, rel: res.path || '' };
+
+        if (!res.entries.length) {
+            box.innerHTML = '<div class="empty-state py-4"><i class="bi bi-inbox"></i><p>This folder has no sub-folders.<br>The current folder can still be added.</p></div>';
+        } else {
+            box.innerHTML = res.entries.map((e) => `
+                <button type="button" class="folder-dir" data-dir="${esc(e.rel)}" title="${esc(e.rel)}">
+                    <i class="bi bi-folder-fill"></i>
+                    <span class="folder-dir-name">${esc(e.name)}</span>
+                    <i class="bi bi-chevron-right folder-dir-go" aria-hidden="true"></i>
+                </button>`).join('');
+            box.querySelectorAll('[data-dir]').forEach((btn) => {
+                btn.addEventListener('click', () => browseInto(btn.dataset.dir));
+            });
+        }
+    }
+
+    async function openFoldersModal() {
+        if (isBusy()) return;
+        const modalEl = $('#foldersModal');
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        foldersStatus('Loading folders...');
+        renderFoldersList();
+        renderRootsSelect();
+        await browseInto('');
+        await refreshFolders();
+    }
+
+    async function refreshFolders() {
+        state.folders = await fetchFolders();
+        renderFoldersList();
+        updateFoldersBadge();
+        updateCounts();
+    }
+
+    async function addCurrentFolder() {
+        if (foldersState.loading) return;
+        if (!foldersState.root) {
+            toast('Select a root first', 'warning');
+            return;
+        }
+        const target = foldersState.target;
+        if (!target) {
+            toast('Select a folder to add', 'warning');
+            return;
+        }
+
+        foldersState.loading = true;
+        const btn = $('#folderAddBtn');
+        btn.disabled = true;
+        try {
+            const res = await foldersApi.add(foldersState.root, target.rel, $('#folderLabelInput').value.trim());
+            toast(`Folder added: ${res.folder.label}`, 'success');
+            $('#folderLabelInput').value = '';
+            await refreshFolders();
+            await browseInto(target.rel);
+        } catch (err) {
+            if (err.status === 409) {
+                toast('This folder is already registered', 'warning');
+            } else {
+                toast(`Unable to add the folder: ${err.message}`, 'error');
+            }
+        } finally {
+            foldersState.loading = false;
+            btn.disabled = false;
+        }
+    }
+
+    async function removeFolder(id) {
+        if (foldersState.loading) return;
+        const folder = state.folders.find((f) => f.id === id);
+        if (!folder) return;
+
+        const ok = await confirmDialog(
+            `Remove "${folder.label}" from the library? Files and metadata on disk are not touched.`
+        );
+        if (!ok) return;
+
+        foldersState.loading = true;
+        try {
+            await foldersApi.remove(id);
+            toast('Folder removed from the library', 'success');
+            await refreshFolders();
+        } catch (err) {
+            toast(`Unable to remove the folder: ${err.message}`, 'error');
+        } finally {
+            foldersState.loading = false;
+        }
+    }
+
+    async function scanFolders() {
+        if (isBusy()) return;
+        if (state.folders.length === 0) {
+            toast('Add at least one folder first', 'warning');
+            return;
+        }
+        bootstrap.Modal.getOrCreateInstance('#foldersModal').hide();
+        await loadLibrary();
     }
 
     /* ---------- Cover modal ---------- */
@@ -1699,6 +2114,19 @@ for (const t of state.tracks) {
 
         tree.addEventListener('click', (e) => {
             if (e.target.closest('.artist-check, .album-check, .tv-check')) return;
+            // I pulsanti Play hanno la precedenza: il click non deve aprire il
+            // pannello dei dettagli ne' selezionare la riga.
+            const playBtn = e.target.closest('[data-action="play-track"], [data-action="play-album"]');
+            if (playBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (playBtn.dataset.action === 'play-album') {
+                    playAlbum(playBtn.dataset.album);
+                } else {
+                    toggleTrack(playBtn.dataset.path, playBtn.dataset.album);
+                }
+                return;
+            }
             const editBtn = e.target.closest('[data-action="edit-track"]');
             if (editBtn) {
                 e.preventDefault();
@@ -1746,48 +2174,46 @@ for (const t of state.tracks) {
 
     /* ---------- Events ---------- */
     function wireEvents() {
-        $('#scanBtn').addEventListener('click', () => {
-            if (isBusy()) return;
-            const value = $('#libraryPath').value.trim();
-            if (!value) {
-                toast('Enter the library path', 'warning');
-                return;
-            }
-            state.libraryPath = value;
-            loadLibrary();
-        });
-
-        $('#libraryPath').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                $('#scanBtn').click();
-            }
-        });
-
         $('#reloadBtn').addEventListener('click', () => {
             if (isBusy()) return;
-            if (!state.libraryPath) {
+            if (!useConfiguredFolders() && !state.libraryPath) {
                 toast('No library loaded', 'warning');
                 return;
             }
             loadLibrary();
         });
 
+        $('#foldersBtn').addEventListener('click', openFoldersModal);
+
+        $('#folderRootSelect').addEventListener('change', (e) => {
+            foldersState.root = e.target.value;
+            $('#folderLabelInput').value = '';
+            browseInto('');
+        });
+
+        $('#folderUpBtn').addEventListener('click', () => {
+            if (!foldersState.rel) return;
+            const cut = foldersState.rel.lastIndexOf('/');
+            browseInto(cut === -1 ? '' : foldersState.rel.slice(0, cut));
+        });
+
+        $('#folderAddBtn').addEventListener('click', addCurrentFolder);
+        $('#foldersScanBtn').addEventListener('click', scanFolders);
+
+        $('#foldersModal').addEventListener('hidden.bs.modal', () => {
+            foldersState.loading = false;
+        });
+
         let debounceTimer = null;
         $('#searchInput').addEventListener('input', (e) => {
             clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                state.searchQuery = e.target.value;
-                $('#clearSearchBtn').classList.toggle('hidden', !e.target.value);
-                renderView();
-            }, 150);
+            const value = e.target.value;
+            debounceTimer = setTimeout(() => setSearchQuery(value), 150);
         });
 
         $('#clearSearchBtn').addEventListener('click', () => {
-            $('#searchInput').value = '';
-            state.searchQuery = '';
-            $('#clearSearchBtn').classList.add('hidden');
-            renderView();
+            setSearchQuery('');
+            $('#searchInput').focus();
         });
 
         $('#filterFormat').addEventListener('change', (e) => {
@@ -1826,7 +2252,7 @@ for (const t of state.tracks) {
             if (playBtn) {
                 e.preventDefault();
                 e.stopPropagation();
-                playTrackByPath(playBtn.dataset.path);
+                toggleTrack(playBtn.dataset.path);
                 return;
             }
             const row = e.target.closest('.track-row');
@@ -1874,6 +2300,7 @@ for (const t of state.tracks) {
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+        syncHeaderHeight();
         wireEvents();
         initPlayer();
         init();

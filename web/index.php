@@ -14,13 +14,13 @@
     <!-- ======= TOP BAR ======= -->
     <header class="app-header sticky-top">
         <nav class="navbar navbar-expand-lg" aria-label="Main navigation">
-            <div class="container-fluid px-3 px-lg-4">
+            <div class="container-fluid px-3 px-lg-4 header-row">
                 <a class="navbar-brand d-flex align-items-center gap-2" href="#">
                     <span class="brand-mark"><i> <img src="audio-metadati-manager-logo.svg"></i></span>
                     <span class="brand-text">Audio Metadati Manager</span>
                 </a>
 
-                <div class="d-flex align-items-center gap-2 order-lg-3">
+                <div class="d-flex align-items-center gap-2 order-lg-3" id="headerActions">
                     <span class="badge rounded-pill badge-soft library-badge" id="trackCountBadge" title="Library summary">
                         <i class="bi bi-collection" aria-hidden="true"></i>
                         <span id="libraryStats" class="library-stats-inline" aria-live="polite">—</span>
@@ -30,14 +30,30 @@
                     </button>
                 </div>
 
-                <div class="order-lg-2 ms-lg-auto me-lg-3 w-100 mt-2 mt-lg-0" style="max-width: 640px;">
-                    <div class="input-group input-group-path">
-                        <span class="input-group-text"><i class="bi bi-folder2-open"></i></span>
-                        <input type="text" id="libraryPath" class="form-control" placeholder="Music library path..." aria-label="Music library path" spellcheck="false">
-                        <button class="btn btn-gold" type="button" id="scanBtn">
-                            <i class="bi bi-search me-1"></i> SCAN
+                <!-- Mini player: same <audio> element and same playerState as the
+                     play buttons of the tracks and of the albums, no second player. -->
+                <div class="order-lg-2 ms-lg-auto me-lg-3 mini-player" id="miniPlayer" role="group" aria-label="Mini player">
+                    <span class="mini-eq" id="miniEq" aria-hidden="true">
+                        <span></span><span></span><span></span><span></span>
+                    </span>
+                    <span class="mini-meta" aria-live="polite">
+                        <span class="mini-title" id="miniTitle" title="Nessuna traccia in riproduzione">Nessuna traccia in riproduzione</span>
+                        <span class="mini-artist" id="miniArtist"></span>
+                    </span>
+                    <span class="mini-controls">
+                        <button class="mini-btn" type="button" id="miniPrevBtn"
+                                aria-label="Traccia precedente" title="Traccia precedente" disabled>
+                            <i class="bi bi-skip-backward"></i>
                         </button>
-                    </div>
+                        <button class="mini-btn mini-btn-play" type="button" id="miniPlayPauseBtn"
+                                aria-label="Riproduci" title="Riproduci" disabled>
+                            <i class="bi bi-play-fill"></i>
+                        </button>
+                        <button class="mini-btn" type="button" id="miniNextBtn"
+                                aria-label="Traccia successiva" title="Traccia successiva" disabled>
+                            <i class="bi bi-skip-forward"></i>
+                        </button>
+                    </span>
                 </div>
             </div>
         </nav>
@@ -45,23 +61,39 @@
 
     <main class="app-main container-fluid px-3 px-lg-4 py-3 py-lg-4">
 
-        <!-- ======= LIBRARY HEADER ======= -->
-        <div class="library-header">
-            <div class="library-header-search">
-                <div class="search-wrap w-100" style="max-width: 460px;">
-                    <div class="input-group">
-                        <span class="input-group-text"><i class="bi bi-search"></i></span>
-                        <input type="search" id="searchInput" class="form-control" placeholder="Search artist, album or track..." aria-label="Search artist, album or track" autocomplete="off">
-                        <button class="btn btn-clear hidden" type="button" id="clearSearchBtn" tabindex="-1" aria-label="Clear search" title="Clear search">
-                            <i class="bi bi-x-lg"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+        
         <!-- ======= TOOLBAR ======= -->
         <div class="app-toolbar d-flex flex-column flex-lg-row gap-2 gap-lg-3 align-items-lg-center mb-3">
+
+            <!-- Search -->
+            <div class="search-wrap flex-grow-1 flex-shrink-0" style="max-width: 460px; min-width: 280px;">
+                <div class="input-group flex-nowrap">
+                    <span class="input-group-text">
+                        <i class="bi bi-search"></i>
+                    </span>
+
+                    <input
+                        type="search"
+                        id="searchInput"
+                        class="form-control"
+                        placeholder="Search artist, album or track..."
+                        aria-label="Search artist, album or track"
+                        autocomplete="off"
+                    >
+
+                    <button
+                        class="btn btn-clear hidden"
+                        type="button"
+                        id="clearSearchBtn"
+                        tabindex="-1"
+                        aria-label="Clear search"
+                        title="Clear search"
+                    >
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+
 
             <div class="btn-group btn-group-sm" role="group" aria-label="Library view">
                 <button class="btn btn-outline-secondary" type="button" id="viewArtistsBtn" aria-pressed="true" title="Browse by artist and album">
@@ -73,6 +105,13 @@
             </div>
 
             <div class="d-flex flex-wrap align-items-center gap-2">
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="foldersBtn"
+                        data-bs-toggle="tooltip" data-bs-placement="bottom"
+                        title="Browse and register the music folders available in the container">
+                    <i class="bi bi-folder-plus me-1"></i>Cartelle musicali
+                    <span class="badge rounded-pill badge-soft ms-1 d-none" id="foldersCountBadge" aria-hidden="true">0</span>
+                </button>
+
                 <select id="filterFormat" class="form-select form-select-sm w-auto" aria-label="Format filter">
                     <option value="all">All formats</option>
                     <option value=".mp3">MP3</option>
@@ -174,38 +213,6 @@
                 </section>
             </div>
         </div>
-
-<!-- ======= AUDIO PLAYER ======= -->
-        <section class="audio-player-panel d-none" id="audioPlayerPanel" aria-label="Audio player">
-            <div class="audio-player-inner">
-                <div class="player-track-info">
-                    <div class="player-cover" aria-hidden="true">
-                        <div class="cover-placeholder"><i class="bi bi-music-note-beamed"></i></div>
-                    </div>
-                    <div class="player-meta">
-                        <div class="player-title" id="playerTitle">No track</div>
-                        <div class="player-artist" id="playerArtist">—</div>
-                    </div>
-                </div>
-                <div class="player-controls">
-                    <button type="button" class="btn btn-player" id="playerPrev" aria-label="Previous" title="Previous"><i class="bi bi-skip-backward"></i></button>
-                    <button type="button" class="btn btn-player btn-play" id="playerPlayPause" aria-label="Play" title="Play"><i class="bi bi-play-fill"></i></button>
-                    <button type="button" class="btn btn-player" id="playerNext" aria-label="Next" title="Next"><i class="bi bi-skip-forward"></i></button>
-                </div>
-                <div class="player-progress-wrap">
-                    <span class="player-time" id="playerCurrentTime">0:00</span>
-                    <div class="player-progress" id="playerProgress" role="slider" aria-label="Playback progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
-                        <div class="player-progress-fill" id="playerProgressFill"></div>
-                        <div class="player-progress-handle" id="playerProgressHandle"></div>
-                    </div>
-                    <span class="player-time" id="playerDuration">0:00</span>
-                </div>
-                <div class="player-volume-wrap">
-                    <button type="button" class="btn btn-volume" id="playerVolumeBtn" aria-label="Mute" title="Mute"><i class="bi bi-volume-up-fill"></i></button>
-                    <input type="range" class="player-volume-slider" id="playerVolume" min="0" max="1" step="0.05" value="1" aria-label="Volume">
-                </div>
-            </div>
-        </section>
 
         <footer class="app-footer">
     <div class="footer-left">
@@ -332,6 +339,83 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" id="bulkCancelBtn" data-bs-dismiss="modal">Annulla</button>
                     <button type="button" class="btn btn-gold" id="bulkApplyBtn"><i class="bi bi-check2-circle me-1"></i>Salva modifiche</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======= MUSIC FOLDERS MODAL ======= -->
+    <div class="modal fade" id="foldersModal" tabindex="-1" aria-labelledby="foldersModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="foldersModalLabel"><i class="bi bi-folder-plus"></i> Cartelle musicali</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="row g-3">
+
+                        <!-- Registered folders -->
+                        <div class="col-12 col-lg-5">
+                            <div class="folder-panel">
+                                <div class="folder-panel-head">
+                                    <span class="panel-title"><i class="bi bi-collection"></i> Registered folders</span>
+                                </div>
+                                <div class="folder-panel-body" id="foldersList" aria-live="polite">
+                                    <div class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Explorer -->
+                        <div class="col-12 col-lg-7">
+                            <div class="folder-panel">
+                                <div class="folder-panel-head">
+                                    <span class="panel-title"><i class="bi bi-folder2-open"></i> Add a folder</span>
+                                </div>
+                                <div class="folder-panel-body">
+                                    <div class="mb-2">
+                                        <label class="form-label" for="folderRootSelect">Mounted root</label>
+                                        <select id="folderRootSelect" class="form-select form-select-sm" aria-label="Mounted root"></select>
+                                    </div>
+
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <button class="btn btn-outline-secondary btn-sm flex-shrink-0" type="button" id="folderUpBtn"
+                                                aria-label="Go to the parent folder" title="Parent folder" disabled>
+                                            <i class="bi bi-arrow-90deg-up"></i>
+                                        </button>
+                                        <code class="folder-path flex-grow-1" id="folderCurrentPath" aria-live="polite">—</code>
+                                    </div>
+
+                                    <div class="folder-browser" id="folderBrowser" aria-live="polite">
+                                        <div class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div></div>
+                                    </div>
+
+                                    <div class="mt-3">
+                                        <label class="form-label" for="folderLabelInput">Label (optional)</label>
+                                        <input type="text" id="folderLabelInput" class="form-control form-control-sm"
+                                               placeholder="e.g. Rock" maxlength="120" autocomplete="off">
+                                    </div>
+                                    <p class="form-text mb-0" id="folderBrowserHint">Select a folder in the list, or the current one, then add it.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="modal-footer justify-content-between align-items-center flex-wrap gap-2">
+                    <span class="text-muted small" id="foldersStatus" aria-live="polite"></span>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-outline-gold" id="folderAddBtn">
+                            <i class="bi bi-plus-lg me-1"></i>Add this folder
+                        </button>
+                        <button type="button" class="btn btn-gold" id="foldersScanBtn">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Scan folders
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -139,10 +139,73 @@ The easiest way to run the application is using Docker Compose.
    library root the application reads. To change it, edit `MUSIC_PATH` in `.env` and
    run `docker compose up -d` again.
 
+   To use **several** music folders (for example one per disk), see
+   [Multiple music folders](#multiple-music-folders) below.
+
 6. **Common Docker Commands**
    - View logs: `docker compose logs -f`
    - Stop application: `docker compose down`
    - Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Multiple music folders
+
+By default the application reads a single music root (`MUSIC_PATH` → `/music`).
+If your music is spread over several disks, add the extra paths to `.env`:
+
+```bash
+MUSIC_PATH=/mnt/primary-disk/music
+MUSIC_PATH_2=/mnt/secondary-disk/albums
+MUSIC_PATH_3=/mnt/third-disk/field-recordings
+```
+
+Each host path is mounted on its own stable container path, so the application
+never confuses them:
+
+| `.env` variable | inside the container |
+|-----------------|----------------------|
+| `MUSIC_PATH`    | `/music`             |
+| `MUSIC_PATH_2`  | `/music-roots/music2`|
+| `MUSIC_PATH_3`  | `/music-roots/music3`|
+
+`MUSIC_PATH_2` and `MUSIC_PATH_3` are **optional**: leave them out and everything
+behaves exactly as before, with one single root.
+
+**Adding a mount later.** The mounts are fixed when the container starts, so after
+adding or changing a host path in `.env` recreate the container:
+
+```bash
+docker compose up -d --build     # or simply: docker compose up -d
+```
+
+**Selecting the folders.** Open the application and press **Cartelle musicali** in
+the toolbar. The dialog lets you:
+
+- browse each mounted root one directory at a time and add the folder you want
+  (a sub-folder of the root is enough — the whole root works too);
+- give each entry a readable label;
+- see at a glance whether a folder is **available** (the disk is mounted) or
+  **missing** (unplugged / wrong path);
+- remove a folder from the library — this only deletes the entry, never a file.
+
+Once at least one folder is registered, **SCAN** and the reload button read all of
+them together; files reachable from two overlapping entries are imported only once.
+
+The selected folders are stored in the `audio-data` Docker volume, so they survive
+container restarts and image rebuilds.
+
+#### Diagnosing a folder that is not accessible
+
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `docker compose up` fails with `bind source path does not exist` | the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist | create the folder or fix the path in `.env`, then `docker compose up -d` |
+| A root shows *not available* in the dialog | the disk is not mounted in the running container | `docker compose up -d` to recreate it after editing `.env` |
+| A folder shows **MISSING** | the disk was unplugged after start-up | reconnect it and press the reload button; nothing is re-registered automatically |
+| A folder is registered but the scan returns 0 tracks | the folder has no `.mp3`, `.flac` or `.m4a` files, or they live deeper in sub-folders | check the folder contents; hidden folders (`.something`) are not offered by the browser |
+| On macOS the folder is empty | the folder is not shared with Docker Desktop | add it in Docker Desktop → Settings → Resources → File sharing |
+
+Nothing of the host filesystem is exposed beyond the folders you mounted, and the
+browser can only navigate inside them: it never sends an absolute path, and the
+server re-validates every request with `realpath()`.
 
 ### Music folder requirements
 
@@ -151,7 +214,9 @@ The easiest way to run the application is using Docker Compose.
 - It must be **accessible to Docker**: on macOS and Windows, share the folder with
   Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
 - The container needs **write access** to it, because metadata and embedded cover art
-  are written into your audio files.
+  are written into your audio files. Every music mount (including `MUSIC_PATH_2` and
+  `MUSIC_PATH_3`) is therefore read-write; adding `read_only: true` to an entry in
+  `docker-compose.yml` makes that root browsable but not editable.
 
 ### Permissions
 The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
@@ -219,6 +284,20 @@ The application needs to know where your music library is. There are three ways 
 
 > Replace `/path/to/your/music` with the actual path of your music folder.
 
+**Additional roots without Docker.** The same multi-root logic used in Docker can
+be enabled by hand with `AUDIO_MUSIC_ROOTS`, a comma separated list of `id:path`
+pairs. `AUDIO_LIBRARY_OVERRIDE` (or `AUDIO_LIBRARY_PATH`) stays the first root and
+keeps the identifier `music`:
+
+```bash
+export AUDIO_LIBRARY_OVERRIDE=/srv/music
+export AUDIO_MUSIC_ROOTS=music2:/mnt/second-disk,music3:/mnt/third-disk
+```
+
+Where the registered folders are stored: in `AUDIO_DATA_DIR` when it is set,
+otherwise in the `data/` folder of the project. Set it to a persistent location if
+you run the application without Docker.
+
 ## Starting the application
 
 ### Using the script
@@ -255,11 +334,13 @@ The document root is the `web/` folder.
 3. **Scan the directory** – click **SCAN** (or press Enter in the path box) to load the tracks.
 4. **Browse tracks** – the table shows cover, track number, title, artist, album, genre, year, duration, filename and status.
 5. **Search and filter** – type in the search box (title, artist, album, genre, filename) or use the format/status filters.
-6. **Select a track** – click a row to open the details panel (side panel on desktop, off-canvas on mobile).
-7. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
-8. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
-9. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, apply, then save.
-10. **Manage covers** – click the cover in the details panel to open the cover selector (see below).
+6. **Select the music folders** (optional, once) – click **Cartelle musicali** in the toolbar to browse the mounted roots and register the folders you want in the library. See [Multiple music folders](#multiple-music-folders).
+7. **Play** – press the **Play** button of a track (artist/album tree or flat list) or of an album card. The header mini player takes over: it shows the title, and *Next* / *Previous* walk through the album (or through the visible list, when the playback was started from a single track of the flat list).
+8. **Select a track** – click a row to open the details panel (side panel on desktop, off-canvas on mobile).
+9. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
+10. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
+11. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, apply, then save.
+12. **Manage covers** – click the cover in the details panel to open the cover selector (see below).
 
 ## Cover management
 
@@ -287,10 +368,12 @@ It asks for a music folder, a global artist/album/year, and then the title and t
 .
 ├── install.sh              # One-shot installation script
 ├── start.sh                # Web server startup script
-├── docker-compose.yml      # Docker Compose configuration (reads MUSIC_PATH)
+├── docker-compose.yml      # Docker Compose configuration (reads MUSIC_PATH*)
+├── docker-placeholder/     # Empty folders used when MUSIC_PATH_2/3 are unset
 ├── .env.example            # Template for .env — committed, no secrets
 ├── .env                    # Local Docker settings (ignored by Git)
 ├── requirements.txt        # Python dependencies (mutagen)
+├── tests/                  # Dependency free test suite (PHP, Python, Compose, HTTP)
 ├── metadati.py             # Command-line interface
 ├── python/
 │   ├── core.py             # Python audio core (metadata + covers, mutagen)
@@ -300,14 +383,22 @@ It asks for a music folder, a global artist/album/year, and then the title and t
     ├── config.php          # Configuration loader (portable)
     ├── config.example.php  # Template for the local configuration
     └── api/
-        ├── bootstrap.php   # Shared helpers (Python bridge, path checks, JSON)
-        ├── config.php      # GET  - application configuration
-        ├── tracks.php      # GET  - list tracks
-        ├── metadata.php    # GET  - track metadata
-        ├── save.php        # POST - save a track's metadata + cover
-        ├── scan.php        # POST - scan a folder
-        ├── bulk-update.php # POST - bulk metadata / cover operations
-        └── cover.php       # GET  - serve cover images
+        ├── bootstrap.php       # Shared helpers (Python bridge, path checks, JSON)
+        ├── library-roots.php   # Authorized music roots + safe relative paths
+        ├── library-folders.php # Persistent list of registered folders
+        #   ^ the three files above are includes, not endpoints: requesting them
+        #     directly returns 403 with a JSON error, never an empty 200.
+        ├── config.php          # GET  - application configuration (root + roots[])
+        ├── browse.php          # GET  - list ONE directory level of a root
+        ├── folders.php         # GET/POST - list / add / remove registered folders
+        ├── library.php         # GET  - scan every registered folder and merge
+        ├── tracks.php          # GET  - list tracks
+        ├── metadata.php        # GET  - track metadata
+        ├── save.php            # POST - save a track's metadata + cover
+        ├── scan.php            # POST - scan a folder
+        ├── bulk-update.php     # POST - bulk metadata / cover operations
+        ├── audio.php           # GET  - stream audio with Range support
+        └── cover.php           # GET  - serve cover images
     └── assets/
         ├── css/style.css   # Custom dark theme
         └── js/app.js       # Vanilla JavaScript + Fetch API
@@ -319,7 +410,11 @@ All endpoints return JSON. Success responses use `"success": true`, errors use `
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `GET` | `/api/config.php` | Return the application configuration (library path) |
+| `GET` | `/api/config.php` | Return the application configuration (`library_path`, `roots[]`) |
+| `GET` | `/api/browse.php?root=music2&path=Rock` | List one directory level inside an authorized root |
+| `GET` | `/api/folders.php` | List the registered music folders |
+| `POST` | `/api/folders.php` | `{"action":"add","root":"music2","path":"Rock"}` / `{"action":"remove","id":"f_..."}` |
+| `GET` | `/api/library.php` | Scan every registered folder and return the merged, de-duplicated track list |
 | `GET` | `/api/tracks.php?path=/folder` | Return the list of tracks in a folder |
 | `GET` | `/api/metadata.php?path=/file` | Return the metadata of a single file |
 | `POST` | `/api/scan.php` | Scan a folder and return its tracks |
@@ -378,10 +473,11 @@ curl -X POST "http://localhost:8000/api/bulk-update.php" \
 
 - **Input validation** – all browser input is validated before reaching Python.
 - **Path normalization** – paths are resolved with `realpath()` and rejected if they do not exist.
-- **Path traversal protection** – when a library root is configured, only paths inside the library are accepted.
+- **Path traversal protection** – when a music root is configured, only paths inside one of the roots are accepted. The folder browser never sends an absolute path: it sends a root identifier plus a relative path, and the server re-validates both with `realpath()`, which also blocks `..` and symlinks pointing outside the root.
 - **Command injection protection** – every argument passed to Python is shell-escaped with `escapeshellarg()`.
 - **Explicit writes** – audio files are never re-encoded; metadata and covers are written only when the user saves.
 - **No destructive operations** – cover images and audio files are never deleted, moved or renamed by the application.
+- **No half-open doors** – the shared include files that live inside the served document root (`web/config.php`, `web/api/bootstrap.php`, `web/api/library-roots.php`, `web/api/library-folders.php`) refuse direct requests with `403` and a JSON error. They used to answer `200` with an empty body, which looks exactly like a silent crash to a client calling `response.json()`.
 
 ## Troubleshooting
 
@@ -391,15 +487,45 @@ curl -X POST "http://localhost:8000/api/bulk-update.php" \
 - **`Permission denied` on install/start** – the scripts must be executable: `chmod +x install.sh start.sh`.
 - **Music directory inaccessible** – make sure the web server process can read the folder and that the path exists.
 - **`Invalid library folder` / empty library** – check the path in `web/config.local.php`, the `AUDIO_LIBRARY_OVERRIDE` environment variable, or the path typed in the interface.
+- **A folder shows MISSING in the dialog** – the disk behind that mount is unplugged or the container was started before the path was added to `.env`; reconnect it and run `docker compose up -d` again.
+- **A new `MUSIC_PATH_2` is ignored** – mounts are fixed at container start: after editing `.env` run `docker compose up -d --build`.
+- **`bind source path does not exist` at start-up** – the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist; create it or correct the path.
 - **Port already in use** – start on another port: `./start.sh 8080`.
 - **Browser cannot connect** – make sure the server is running and check the URL/port.
 - **LAN access blocked** – allow the port in your firewall, and use your machine's LAN IP address.
+
+## Tests
+
+The suite needs no music library of yours and no external dependency: every test
+builds its own temporary directories and its own silent MP3 fixtures.
+
+```bash
+# PHP: roots, explorer, persistent folders, scanning, regressions
+php tests/run-tests.php
+
+# Optional: end-to-end tests that really run python/comm.py with mutagen
+AUDIO_PYTHON_BIN=.venv/bin/python php tests/run-tests.php
+
+# Python: discovery, metadata, covers, overlapping folders
+.venv/bin/python tests/test_scan.py
+
+# Docker Compose: single mount, three mounts, empty variable, no .env
+./tests/check-compose.sh
+
+# Header / mini player in a real headless Chrome (skips without Chrome)
+./tests/run-ui.sh
+
+# Real HTTP server, temporary library, JSON request bodies included
+AUDIO_PYTHON_BIN=.venv/bin/python ./tests/check-http.sh
+```
+
+Without mutagen the six end-to-end cases are reported as skipped instead of failed.
 
 ## Contributing
 
 The Python core lives in `python/core.py` (metadata and cover logic) and `python/comm.py` (JSON bridge for PHP). The PHP API is in `web/api/`, and the frontend is in `web/index.php` plus `web/assets/`.
 
-To test a change, start the server with `./start.sh` and exercise the interface, or call the Python core directly:
+To test a change, start the server with `./start.sh` and exercise the interface, run the suite in `tests/`, or call the Python core directly:
 
 ```bash
 .venv/bin/python python/comm.py list_tracks /path/to/your/music
