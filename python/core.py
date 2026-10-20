@@ -58,7 +58,9 @@ def save_tags(path, title, artist, album, album_artist, year, track, total, genr
             audio = EasyID3(path)
         except Exception:
             audio = MP3(path)
-            audio.add_tags()
+            # Only add tags if they don't exist
+            if audio.tags is None:
+                audio.add_tags()
             audio = EasyID3(path)
         audio["title"] = [title]
         audio["artist"] = [artist]
@@ -391,7 +393,9 @@ def set_embedded_cover(path, image_path):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".mp3":
         audio = MP3(path)
-        audio.add_tags()
+        # Only add tags if they don't exist
+        if audio.tags is None:
+            audio.add_tags()
         audio.tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=data))
         audio.save()
     elif ext == ".flac":
