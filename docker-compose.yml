@@ -5,31 +5,16 @@ services:
     ports:
       - "${PORT:-8000}:8000"
     volumes:
-      # Primary music mount — unchanged: MUSIC_PATH (host) -> /music.
+      # Primary music mount — default: ./music (relative to project) -> /music in container.
+      # For a persistent location outside the project, set MUSIC_PATH in .env to an absolute host path.
+      # Example: MUSIC_PATH=/home/user/audio-metadati-manager/music
+      # The ./music fallback creates a music folder in the project directory if .env is not configured.
       - ${MUSIC_PATH:-./music}:/music
-      # Additional music mounts, mounted on different host disks if needed.
-      # Each one lands on its own stable container path (/music-roots/musicN)
-      # so a file is never reachable through two different roots.
-      # Defaults point to the empty "docker-placeholder" folders: users who do
-      # not need extra roots simply never touch MUSIC_PATH_2 / MUSIC_PATH_3.
-      # create_host_path:false makes a wrong path fail loudly instead of
-      # silently creating an empty directory.
-      #
-      # These mounts are read-write, like /music, because the application writes
-      # the tags and the embedded cover INTO the audio files: mounting them "ro"
-      # would make saving fail with "Read-only file system". If you only want to
-      # browse those roots without editing them, add "read_only: true" to the
-      # entry below.
-      - type: bind
-        source: ${MUSIC_PATH_2:-./docker-placeholder/music2}
-        target: /music-roots/music2
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${MUSIC_PATH_3:-./docker-placeholder/music3}
-        target: /music-roots/music3
-        bind:
-          create_host_path: false
+      # Optional additional music mounts — each one gets its own stable container path.
+      # To enable extra mounts, create a docker-compose.override.yml file (see docker-compose.extra.yml.example)
+      # or uncomment the lines below and set MUSIC_PATH_2 / MUSIC_PATH_3 in .env.
+      # - ${MUSIC_PATH_2}:/music-roots/music2
+      # - ${MUSIC_PATH_3}:/music-roots/music3
       # Persistent application data (registered music folders + settings).
       # Survives container recreation and image rebuilds.
       - audio-data:/app/data

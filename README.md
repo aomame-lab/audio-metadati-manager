@@ -92,60 +92,107 @@ No PHP extensions or Composer are required. The application uses only the PHP bu
 
 The easiest way to run the application is using Docker Compose.
 
-1. **Prepare your music folder**
+#### Quick Start (uses default `./music` folder in the project)
 
-   Create a `music` directory in the project root, or point the application at an
-   existing one. The path is not hardcoded: it is read from the `MUSIC_PATH`
-   variable, so this repository can be cloned and started on any machine without
-   editing `docker-compose.yml`.
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir -p music          # create a music folder in the project (or use your own)
+docker compose up -d --build
+```
 
-2. **Create your local configuration**
+Then open [http://localhost:8000](http://localhost:8000) in your browser.
+
+---
+
+### Using Your Own Music Folder (Recommended)
+
+For a persistent library outside the project, configure an absolute path on your host:
+
+1. **Create your local configuration**
 
    ```bash
    cp .env.example .env
    ```
 
-   Then edit `.env` and set `MUSIC_PATH` to the **absolute path** of your music folder
-   on this machine:
+2. **Edit `.env` and set `MUSIC_PATH` to the absolute path of your music folder**
 
    ```bash
-   MUSIC_PATH=/Users/alice/Music        # macOS / Linux
-   MUSIC_PATH=C:/Users/Alice/Music      # Windows
+   # macOS / Linux
+   MUSIC_PATH=/home/yourname/audio-metadati-manager/music
+
+   # Windows (use forward slashes)
+   MUSIC_PATH=C:/Users/yourname/audio-metadati-manager/music
+
+   # Linux server
+   MUSIC_PATH=/srv/audio-metadati-manager/music
    ```
 
-   `.env` stays on your computer and is **not** committed to Git (`.env.example` is
-   the committed template and contains no secrets).
+   > **Important:** Use an **absolute path** on the host. Docker Compose does **not** expand `~` (tilde).
+   > The folder **must already exist** on the host. If it doesn't exist, Docker will create an empty one.
 
-   If you skip this step, `MUSIC_PATH` falls back to `./music`, the `music` folder in
-   the project root:
-
-   ```bash
-   mkdir music   # copy some audio files here
-   ```
-
-3. **Start the application**
+2. **Start the application**
 
    ```bash
    docker compose up -d --build
    ```
 
-4. **Access the application**
+3. **Access the application**
 
    Open your browser and go to: [http://localhost:8000](http://localhost:8000)
 
-5. **Configure the library**
+---
 
-   Inside the container your folder is always mounted as `/music`, which is the
-   library root the application reads. To change it, edit `MUSIC_PATH` in `.env` and
-   run `docker compose up -d` again.
+### Portainer Deployment
 
-   To use **several** music folders (for example one per disk), see
-   [Multiple music folders](#multiple-music-folders) below.
+The application works seamlessly with Portainer. Since Portainer manages Docker Compose stacks, you have two options:
 
-6. **Common Docker Commands**
-   - View logs: `docker compose logs -f`
-   - Stop application: `docker compose down`
-   - Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+#### Option A: Stack from Repository (Recommended)
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Name**: `audio-metadati-manager`
+3. Set **Build method** to **Repository**
+3. Enter your repository URL and branch
+4. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music`  (absolute path on the **Portainer host**)
+   - `PORT=8000` (optional, defaults to 8000)
+4. Click **Deploy the stack**
+
+> **Important for Portainer:** The `MUSIC_PATH` must be an **absolute path on the Portainer host** (the machine where Docker runs). Portainer does **not** expand `~` (tilde). The folder must exist on the Portainer host and be accessible to Docker.
+
+#### Option B: Stack from Local Compose File
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Build method** to **Web editor**
+3. Copy the contents of `docker-compose.yml` into the editor
+3. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music` (absolute path on the Portainer host)
+   - `PORT=8000` (optional)
+4. Click **Deploy the stack**
+
+> **Note:** In Portainer, the "Build method: Web editor" uses the Compose file you paste. The `.env` file is **not** automatically read from the repository — you must add environment variables in the Portainer UI (Environment variables section).
+
+---
+
+### Using the Default `./music` Folder (No Configuration)
+
+If you don't create a `.env` file, the application falls back to a `music` folder in the project root:
+
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir music        # create a music folder in the project
+docker compose up -d --build
+```
+
+This is convenient for quick testing but **not recommended for persistent libraries** — the `music` folder lives inside the project directory and may be lost if you remove the project.
+
+---
+
+### Common Docker Commands
+- View logs: `docker compose logs -f`
+- Stop application: `docker compose down`
+- Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
 
 ### Multiple music folders
 
@@ -219,6 +266,647 @@ server re-validates every request with `realpath()`.
   `docker-compose.yml` makes that root browsable but not editable.
 
 ### Permissions
+
+The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
+
+---
+
+### Portainer Deployment
+
+The application works seamlessly with Portainer. Since Portainer manages Docker Compose stacks, you have two options:
+
+#### Option A: Stack from Repository (Recommended)
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Name**: `audio-metadati-manager`
+3. Set **Build method** to **Repository**
+3. Enter your repository URL and branch
+4. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music`  (absolute path on the **Portainer host**)
+   - `PORT=8000` (optional, defaults to 8000)
+5. Click **Deploy the stack**
+
+> **Important for Portainer:** The `MUSIC_PATH` must be an **absolute path on the Portainer host** (the machine where Docker runs). Portainer does **not** expand `~` (tilde). The folder must exist on the Portainer host and be accessible to Docker.
+
+#### Option B: Stack from Local Compose File
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Build method** to **Web editor**
+3. Copy the contents of `docker-compose.yml` into the editor
+3. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music` (absolute path on the Portainer host)
+   - `PORT=8000` (optional)
+4. Click **Deploy the stack**
+
+> **Note:** In Portainer, the "Build method: Web editor" uses the Compose file you paste. The `.env` file is **not** automatically read from the repository — you must add environment variables in the Portainer UI (Environment variables section).
+
+---
+
+### Using the Default `./music` Folder (No Configuration)
+
+If you don't create a `.env` file, the application falls back to a `music` folder in the project root:
+
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir music        # create a music folder in the project
+docker compose up -d --build
+```
+
+This is convenient for quick testing but **not recommended for persistent libraries** — the `music` folder lives inside the project directory and may be lost if you remove the project.
+
+---
+
+### Common Docker Commands
+- View logs: `docker compose logs -f`
+- Stop application: `docker compose down`
+- Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Multiple music folders
+
+By default the application reads a single music root (`MUSIC_PATH` → `/music`).
+If your music is spread over several disks, add the extra paths to `.env`:
+
+```bash
+MUSIC_PATH=/mnt/primary-disk/music
+MUSIC_PATH_2=/mnt/secondary-disk/albums
+MUSIC_PATH_3=/mnt/third-disk/field-recordings
+```
+
+Each host path is mounted on its own stable container path, so the application
+never confuses them:
+
+| `.env` variable | inside the container |
+|-----------------|----------------------|
+| `MUSIC_PATH`    | `/music`             |
+| `MUSIC_PATH_2`  | `/music-roots/music2`|
+| `MUSIC_PATH_3`  | `/music-roots/music3`|
+
+`MUSIC_PATH_2` and `MUSIC_PATH_3` are **optional**: leave them out and everything
+behaves exactly as before, with one single root.
+
+**Adding a mount later.** The mounts are fixed when the container starts, so after
+adding or changing a host path in `.env` recreate the container:
+
+```bash
+docker compose up -d --build     # or simply: docker compose up -d
+```
+
+**Selecting the folders.** Open the application and press **Cartelle musicali** in
+the toolbar. The dialog lets you:
+
+- browse each mounted root one directory at a time and add the folder you want
+  (a sub-folder of the root is enough — the whole root works too);
+- give each entry a readable label;
+- see at a glance whether a folder is **available** (the disk is mounted) or
+  **missing** (unplugged / wrong path);
+- remove a folder from the library — this only deletes the entry, never a file.
+
+Once at least one folder is registered, **SCAN** and the reload button read all of
+them together; files reachable from two overlapping entries are imported only once.
+
+The selected folders are stored in the `audio-data` Docker volume, so they survive
+container restarts and image rebuilds.
+
+#### Diagnosing a folder that is not accessible
+
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `docker compose up` fails with `bind source path does not exist` | the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist | create the folder or fix the path in `.env`, then `docker compose up -d` |
+| A root shows *not available* in the dialog | the disk is not mounted in the running container | `docker compose up -d` to recreate it after editing `.env` |
+| A folder shows **MISSING** | the disk was unplugged after start-up | reconnect it and press the reload button; nothing is re-registered automatically |
+| A folder is registered but the scan returns 0 tracks | the folder has no `.mp3`, `.flac` or `.m4a` files, or they live deeper in sub-folders | check the folder contents; hidden folders (`.something`) are not offered by the browser |
+| On macOS the folder is empty | the folder is not shared with Docker Desktop | add it in Docker Desktop → Settings → Resources → File sharing |
+
+Nothing of the host filesystem is exposed beyond the folders you mounted, and the
+browser can only navigate inside them: it never sends an absolute path, and the
+server re-validates every request with `realpath()`.
+
+### Music folder requirements
+
+- The host folder must **exist**. If it does not, Docker creates an empty one and the
+  library will appear empty.
+- It must be **accessible to Docker**: on macOS and Windows, share the folder with
+  Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
+- The container needs **write access** to it, because metadata and embedded cover art
+  are written into your audio files. Every music mount (including `MUSIC_PATH_2` and
+  `MUSIC_PATH_3`) is therefore read-write; adding `read_only: true` to an entry in
+  `docker-compose.yml` makes that root browsable but not editable.
+
+### Permissions
+
+The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
+
+---
+
+### Portainer Deployment
+
+The application works seamlessly with Portainer. Since Portainer manages Docker Compose stacks, you have two options:
+
+#### Option A: Stack from Repository (Recommended)
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Name**: `audio-metadati-manager`
+3. Set **Build method** to **Repository**
+3. Enter your repository URL and branch
+4. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music`  (absolute path on the **Portainer host**)
+   - `PORT=8000` (optional, defaults to 8000)
+5. Click **Deploy the stack**
+
+> **Important for Portainer:** The `MUSIC_PATH` must be an **absolute path on the Portainer host** (the machine where Docker runs). Portainer does **not** expand `~` (tilde). The folder must exist on the Portainer host and be accessible to Docker.
+
+#### Option B: Stack from Local Compose File
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Build method** to **Web editor**
+3. Copy the contents of `docker-compose.yml` into the editor
+3. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music` (absolute path on the Portainer host)
+   - `PORT=8000` (optional)
+4. Click **Deploy the stack**
+
+> **Note:** In Portainer, the "Build method: Web editor" uses the Compose file you paste. The `.env` file is **not** automatically read from the repository — you must add environment variables in the Portainer UI (Environment variables section).
+
+---
+
+### Using the Default `./music` Folder (No Configuration)
+
+If you don't create a `.env` file, the application falls back to a `music` folder in the project root:
+
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir music        # create a music folder in the project
+docker compose up -d --build
+```
+
+This is convenient for quick testing but **not recommended for persistent libraries** — the `music` folder lives inside the project directory and may be lost if you remove the project.
+
+---
+
+### Common Docker Commands
+- View logs: `docker compose logs -f`
+- Stop application: `docker compose down`
+- Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Multiple music folders
+
+By default the application reads a single music root (`MUSIC_PATH` → `/music`).
+If your music is spread over several disks, add the extra paths to `.env`:
+
+```bash
+MUSIC_PATH=/mnt/primary-disk/music
+MUSIC_PATH_2=/mnt/secondary-disk/albums
+MUSIC_PATH_3=/mnt/third-disk/field-recordings
+```
+
+Each host path is mounted on its own stable container path, so the application
+never confuses them:
+
+| `.env` variable | inside the container |
+|-----------------|----------------------|
+| `MUSIC_PATH`    | `/music`             |
+| `MUSIC_PATH_2`  | `/music-roots/music2`|
+| `MUSIC_PATH_3`  | `/music-roots/music3`|
+
+`MUSIC_PATH_2` and `MUSIC_PATH_3` are **optional**: leave them out and everything
+behaves exactly as before, with one single root.
+
+**Adding a mount later.** The mounts are fixed when the container starts, so after
+adding or changing a host path in `.env` recreate the container:
+
+```bash
+docker compose up -d --build     # or simply: docker compose up -d
+```
+
+**Selecting the folders.** Open the application and press **Cartelle musicali** in
+the toolbar. The dialog lets you:
+
+- browse each mounted root one directory at a time and add the folder you want
+  (a sub-folder of the root is enough — the whole root works too);
+- give each entry a readable label;
+- see at a glance whether a folder is **available** (the disk is mounted) or
+  **missing** (unplugged / wrong path);
+- remove a folder from the library — this only deletes the entry, never a file.
+
+Once at least one folder is registered, **SCAN** and the reload button read all of
+them together; files reachable from two overlapping entries are imported only once.
+
+The selected folders are stored in the `audio-data` Docker volume, so they survive
+container restarts and image rebuilds.
+
+#### Diagnosing a folder that is not accessible
+
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `docker compose up` fails with `bind source path does not exist` | the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist | create the folder or fix the path in `.env`, then `docker compose up -d` |
+| A root shows *not available* in the dialog | the disk is not mounted in the running container | `docker compose up -d` to recreate it after editing `.env` |
+| A folder shows **MISSING** | the disk was unplugged after start-up | reconnect it and press the reload button; nothing is re-registered automatically |
+| A folder is registered but the scan returns 0 tracks | the folder has no `.mp3`, `.flac` or `.m4a` files, or they live deeper in sub-folders | check the folder contents; hidden folders (`.something`) are not offered by the browser |
+| On macOS the folder is empty | the folder is not shared with Docker Desktop | add it in Docker Desktop → Settings → Resources → File sharing |
+
+Nothing of the host filesystem is exposed beyond the folders you mounted, and the
+browser can only navigate inside them: it never sends an absolute path, and the
+server re-validates every request with `realpath()`.
+
+### Music folder requirements
+
+- The host folder must **exist**. If it does not, Docker creates an empty one and the
+  library will appear empty.
+- It must be **accessible to Docker**: on macOS and Windows, share the folder with
+  Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
+- The container needs **write access** to it, because metadata and embedded cover art
+  are written into your audio files. Every music mount (including `MUSIC_PATH_2` and
+  `MUSIC_PATH_3`) is therefore read-write; adding `read_only: true` to an entry in
+  `docker-compose.yml` makes that root browsable but not editable.
+
+### Permissions
+
+The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
+
+---
+
+### Portainer Deployment
+
+The application works seamlessly with Portainer. Since Portainer manages Docker Compose stacks, you have two options:
+
+#### Option A: Stack from Repository (Recommended)
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Name**: `audio-metadati-manager`
+3. Set **Build method** to **Repository**
+3. Enter your repository URL and branch
+4. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music`  (absolute path on the **Portainer host**)
+   - `PORT=8000` (optional, defaults to 8000)
+5. Click **Deploy the stack**
+
+> **Important for Portainer:** The `MUSIC_PATH` must be an **absolute path on the Portainer host** (the machine where Docker runs). Portainer does **not** expand `~` (tilde). The folder must exist on the Portainer host and be accessible to Docker.
+
+#### Option B: Stack from Local Compose File
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Build method** to **Web editor**
+3. Copy the contents of `docker-compose.yml` into the editor
+3. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music` (absolute path on the Portainer host)
+   - `PORT=8000` (optional)
+4. Click **Deploy the stack**
+
+> **Note:** In Portainer, the "Build method: Web editor" uses the Compose file you paste. The `.env` file is **not** automatically read from the repository — you must add environment variables in the Portainer UI (Environment variables section).
+
+---
+
+### Using the Default `./music` Folder (No Configuration)
+
+If you don't create a `.env` file, the application falls back to a `music` folder in the project root:
+
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir music        # create a music folder in the project
+docker compose up -d --build
+```
+
+This is convenient for quick testing but **not recommended for persistent libraries** — the `music` folder lives inside the project directory and may be lost if you remove the project.
+
+---
+
+### Common Docker Commands
+- View logs: `docker compose logs -f`
+- Stop application: `docker compose down`
+- Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Multiple music folders
+
+By default the application reads a single music root (`MUSIC_PATH` → `/music`).
+If your music is spread over several disks, add the extra paths to `.env`:
+
+```bash
+MUSIC_PATH=/mnt/primary-disk/music
+MUSIC_PATH_2=/mnt/secondary-disk/albums
+MUSIC_PATH_3=/mnt/third-disk/field-recordings
+```
+
+Each host path is mounted on its own stable container path, so the application
+never confuses them:
+
+| `.env` variable | inside the container |
+|-----------------|----------------------|
+| `MUSIC_PATH`    | `/music`             |
+| `MUSIC_PATH_2`  | `/music-roots/music2`|
+| `MUSIC_PATH_3`  | `/music-roots/music3`|
+
+`MUSIC_PATH_2` and `MUSIC_PATH_3` are **optional**: leave them out and everything
+behaves exactly as before, with one single root.
+
+**Adding a mount later.** The mounts are fixed when the container starts, so after
+adding or changing a host path in `.env` recreate the container:
+
+```bash
+docker compose up -d --build     # or simply: docker compose up -d
+```
+
+**Selecting the folders.** Open the application and press **Cartelle musicali** in
+the toolbar. The dialog lets you:
+
+- browse each mounted root one directory at a time and add the folder you want
+  (a sub-folder of the root is enough — the whole root works too);
+- give each entry a readable label;
+- see at a glance whether a folder is **available** (the disk is mounted) or
+  **missing** (unplugged / wrong path);
+- remove a folder from the library — this only deletes the entry, never a file.
+
+Once at least one folder is registered, **SCAN** and the reload button read all of
+them together; files reachable from two overlapping entries are imported only once.
+
+The selected folders are stored in the `audio-data` Docker volume, so they survive
+container restarts and image rebuilds.
+
+#### Diagnosing a folder that is not accessible
+
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `docker compose up` fails with `bind source path does not exist` | the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist | create the folder or fix the path in `.env`, then `docker compose up -d` |
+| A root shows *not available* in the dialog | the disk is not mounted in the running container | `docker compose up -d` to recreate it after editing `.env` |
+| A folder shows **MISSING** | the disk was unplugged after start-up | reconnect it and press the reload button; nothing is re-registered automatically |
+| A folder is registered but the scan returns 0 tracks | the folder has no `.mp3`, `.flac` or `.m4a` files, or they live deeper in sub-folders | check the folder contents; hidden folders (`.something`) are not offered by the browser |
+| On macOS the folder is empty | the folder is not shared with Docker Desktop | add it in Docker Desktop → Settings → Resources → File sharing |
+
+Nothing of the host filesystem is exposed beyond the folders you mounted, and the
+browser can only navigate inside them: it never sends an absolute path, and the
+server re-validates every request with `realpath()`.
+
+### Music folder requirements
+
+- The host folder must **exist**. If it does not, Docker creates an empty one and the
+  library will appear empty.
+- It must be **accessible to Docker**: on macOS and Windows, share the folder with
+  Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
+- The container needs **write access** to it, because metadata and embedded cover art
+  are written into your audio files. Every music mount (including `MUSIC_PATH_2` and
+  `MUSIC_PATH_3`) is therefore read-write; adding `read_only: true` to an entry in
+  `docker-compose.yml` makes that root browsable but not editable.
+
+### Permissions
+
+The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
+
+---
+
+### Portainer Deployment
+
+The application works seamlessly with Portainer. Since Portainer manages Docker Compose stacks, you have two options:
+
+#### Option A: Stack from Repository (Recommended)
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Name**: `audio-metadati-manager`
+3. Set **Build method** to **Repository**
+3. Enter your repository URL and branch
+4. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music`  (absolute path on the **Portainer host**)
+   - `PORT=8000` (optional, defaults to 8000)
+5. Click **Deploy the stack**
+
+> **Important for Portainer:** The `MUSIC_PATH` must be an **absolute path on the Portainer host** (the machine where Docker runs). Portainer does **not** expand `~` (tilde). The folder must exist on the Portainer host and be accessible to Docker.
+
+#### Option B: Stack from Local Compose File
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Build method** to **Web editor**
+3. Copy the contents of `docker-compose.yml` into the editor
+3. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music` (absolute path on the Portainer host)
+   - `PORT=8000` (optional)
+4. Click **Deploy the stack**
+
+> **Note:** In Portainer, the "Build method: Web editor" uses the Compose file you paste. The `.env` file is **not** automatically read from the repository — you must add environment variables in the Portainer UI (Environment variables section).
+
+---
+
+### Using the Default `./music` Folder (No Configuration)
+
+If you don't create a `.env` file, the application falls back to a `music` folder in the project root:
+
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir music        # create a music folder in the project
+docker compose up -d --build
+```
+
+This is convenient for quick testing but **not recommended for persistent libraries** — the `music` folder lives inside the project directory and may be lost if you remove the project.
+
+---
+
+### Common Docker Commands
+- View logs: `docker compose logs -f`
+- Stop application: `docker compose down`
+- Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Multiple music folders
+
+By default the application reads a single music root (`MUSIC_PATH` → `/music`).
+If your music is spread over several disks, add the extra paths to `.env`:
+
+```bash
+MUSIC_PATH=/mnt/primary-disk/music
+MUSIC_PATH_2=/mnt/secondary-disk/albums
+MUSIC_PATH_3=/mnt/third-disk/field-recordings
+```
+
+Each host path is mounted on its own stable container path, so the application
+never confuses them:
+
+| `.env` variable | inside the container |
+|-----------------|----------------------|
+| `MUSIC_PATH`    | `/music`             |
+| `MUSIC_PATH_2`  | `/music-roots/music2`|
+| `MUSIC_PATH_3`  | `/music-roots/music3`|
+
+`MUSIC_PATH_2` and `MUSIC_PATH_3` are **optional**: leave them out and everything
+behaves exactly as before, with one single root.
+
+**Adding a mount later.** The mounts are fixed when the container starts, so after
+adding or changing a host path in `.env` recreate the container:
+
+```bash
+docker compose up -d --build     # or simply: docker compose up -d
+```
+
+**Selecting the folders.** Open the application and press **Cartelle musicali** in
+the toolbar. The dialog lets you:
+
+- browse each mounted root one directory at a time and add the folder you want
+  (a sub-folder of the root is enough — the whole root works too);
+- give each entry a readable label;
+- see at a glance whether a folder is **available** (the disk is mounted) or
+  **missing** (unplugged / wrong path);
+- remove a folder from the library — this only deletes the entry, never a file.
+
+Once at least one folder is registered, **SCAN** and the reload button read all of
+them together; files reachable from two overlapping entries are imported only once.
+
+The selected folders are stored in the `audio-data` Docker volume, so they survive
+container restarts and image rebuilds.
+
+#### Diagnosing a folder that is not accessible
+
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `docker compose up` fails with `bind source path does not exist` | the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist | create the folder or fix the path in `.env`, then `docker compose up -d` |
+| A root shows *not available* in the dialog | the disk is not mounted in the running container | `docker compose up -d` to recreate it after editing `.env` |
+| A folder shows **MISSING** | the disk was unplugged after start-up | reconnect it and press the reload button; nothing is re-registered automatically |
+| A folder is registered but the scan returns 0 tracks | the folder has no `.mp3`, `.flac` or `.m4a` files, or they live deeper in sub-folders | check the folder contents; hidden folders (`.something`) are not offered by the browser |
+| On macOS the folder is empty | the folder is not shared with Docker Desktop | add it in Docker Desktop → Settings → Resources → File sharing |
+
+Nothing of the host filesystem is exposed beyond the folders you mounted, and the
+browser can only navigate inside them: it never sends an absolute path, and the
+server re-validates every request with `realpath()`.
+
+### Music folder requirements
+
+- The host folder must **exist**. If it does not, Docker creates an empty one and the
+  library will appear empty.
+- It must be **accessible to Docker**: on macOS and Windows, share the folder with
+  Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
+- The container needs **write access** to it, because metadata and embedded cover art
+  are written into your audio files. Every music mount (including `MUSIC_PATH_2` and
+  `MUSIC_PATH_3`) is therefore read-write; adding `read_only: true` to an entry in
+  `docker-compose.yml` makes that root browsable but not editable.
+
+### Permissions
+
+The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
+
+---
+
+### Portainer Deployment
+
+The application works seamlessly with Portainer. Since Portainer manages Docker Compose stacks, you have two options:
+
+#### Option A: Stack from Repository (Recommended)
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Name**: `audio-metadati-manager`
+3. Set **Build method** to **Repository**
+3. Enter your repository URL and branch
+4. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music`  (absolute path on the **Portainer host**)
+   - `PORT=8000` (optional, defaults to 8000)
+5. Click **Deploy the stack**
+
+> **Important for Portainer:** The `MUSIC_PATH` must be an **absolute path on the Portainer host** (the machine where Docker runs). Portainer does **not** expand `~` (tilde). The folder must exist on the Portainer host and be accessible to Docker.
+
+#### Option B: Stack from Local Compose File
+
+1. In Portainer, go to **Stacks** → **Add stack**
+2. Set **Build method** to **Web editor**
+3. Copy the contents of `docker-compose.yml` into the editor
+3. In **Environment variables**, add:
+   - `MUSIC_PATH=/path/to/your/music` (absolute path on the Portainer host)
+   - `PORT=8000` (optional)
+4. Click **Deploy the stack**
+
+> **Note:** In Portainer, the "Build method: Web editor" uses the Compose file you paste. The `.env` file is **not** automatically read from the repository — you must add environment variables in the Portainer UI (Environment variables section).
+
+---
+
+### Using the Default `./music` Folder (No Configuration)
+
+If you don't create a `.env` file, the application falls back to a `music` folder in the project root:
+
+```bash
+git clone <repository-url>
+cd audio-metadati-manager
+mkdir music        # create a music folder in the project
+docker compose up -d --build
+```
+
+This is convenient for quick testing but **not recommended for persistent libraries** — the `music` folder lives inside the project directory and may be lost if you remove the project.
+
+---
+
+### Common Docker Commands
+- View logs: `docker compose logs -f`
+- Stop application: `docker compose down`
+- Change host port: set `PORT=8080` in your `.env` (or in your shell) — `docker-compose.yml` already reads `${PORT:-8000}`.
+
+### Multiple music folders
+
+By default the application reads a single music root (`MUSIC_PATH` → `/music`).
+If your music is spread over several disks, add the extra paths to `.env`:
+
+```bash
+MUSIC_PATH=/mnt/primary-disk/music
+MUSIC_PATH_2=/mnt/secondary-disk/albums
+MUSIC_PATH_3=/mnt/third-disk/field-recordings
+```
+
+Each host path is mounted on its own stable container path, so the application
+never confuses them:
+
+| `.env` variable | inside the container |
+|-----------------|----------------------|
+| `MUSIC_PATH`    | `/music`             |
+| `MUSIC_PATH_2`  | `/music-roots/music2`|
+| `MUSIC_PATH_3`  | `/music-roots/music3`|
+
+`MUSIC_PATH_2` and `MUSIC_PATH_3` are **optional**: leave them out and everything
+behaves exactly as before, with one single root.
+
+**Adding a mount later.** The mounts are fixed when the container starts, so after
+adding or changing a host path in `.env` recreate the container:
+
+```bash
+docker compose up -d --build     # or simply: docker compose up -d
+```
+
+**Selecting the folders.** Open the application and press **Cartelle musicali** in
+the toolbar. The dialog lets you:
+
+- browse each mounted root one directory at a time and add the folder you want
+  (a sub-folder of the root is enough — the whole root works too);
+- give each entry a readable label;
+- see at a glance whether a folder is **available** (the disk is mounted) or
+  **missing** (unplugged / wrong path);
+- remove a folder from the library — this only deletes the entry, never a file.
+
+Once at least one folder is registered, **SCAN** and the reload button read all of
+them together; files reachable from two overlapping entries are imported only once.
+
+The selected folders are stored in the `audio-data` Docker volume, so they survive
+container restarts and image rebuilds.
+
+#### Diagnosing a folder that is not accessible
+
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `docker compose up` fails with `bind source path does not exist` | the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist | create the folder or fix the path in `.env`, then `docker compose up -d` |
+| A root shows *not available* in the dialog | the disk is not mounted in the running container | `docker compose up -d` to recreate it after editing `.env` |
+| A folder shows **MISSING** | the disk was unplugged after start-up | reconnect it and press the reload button; nothing is re-registered automatically |
+| A folder is registered but the scan returns 0 tracks | the folder has no `.mp3`, `.flac` or `.m4a` files, or they live deeper in sub-folders | check the folder contents; hidden folders (`.something`) are not offered by the browser |
+| On macOS the folder is empty | the folder is not shared with Docker Desktop | add it in Docker Desktop → Settings → Resources → File sharing |
+
+Nothing of the host filesystem is exposed beyond the folders you mounted, and the
+browser can only navigate inside them: it never sends an absolute path, and the
+server re-validates every request with `realpath()`.
+
+### Music folder requirements
+
+- The host folder must **exist**. If it does not, Docker creates an empty one and the
+  library will appear empty.
+- It must be **accessible to Docker**: on macOS and Windows, share the folder with
+  Docker Desktop (`HOME`, `/Volumes` and `/private` are shared by default).
+- The container needs **write access** to it, because metadata and embedded cover art
+  are written into your audio files. Every music mount (including `MUSIC_PATH_2` and
+  `MUSIC_PATH_3`) is therefore read-write; adding `read_only: true` to an entry in
+  `docker-compose.yml` makes that root browsable but not editable.
+
+### Permissions
+
 The container runs as root by default to ensure it can write metadata to your mounted music files. If you prefer a specific user, you can add `user: "1000:1000"` (replacing with your UID/GID) to `docker-compose.yml`, provided that user has write access to the music folder on the host.
 
 ---
@@ -337,10 +1025,10 @@ The document root is the `web/` folder.
 6. **Select the music folders** (optional, once) – click **Cartelle musicali** in the toolbar to browse the mounted roots and register the folders you want in the library. See [Multiple music folders](#multiple-music-folders).
 7. **Play** – press the **Play** button of a track (artist/album tree or flat list) or of an album card. The header mini player takes over: it shows the title, and *Next* / *Previous* walk through the album (or through the visible list, when the playback was started from a single track of the flat list).
 8. **Select a track** – click a row to open the details panel (side panel on desktop, off-canvas on mobile).
-9. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
-10. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
-11. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, apply, then save.
-12. **Manage covers** – click the cover in the details panel to open the cover selector (see below).
+5. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
+6. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
+6. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, apply, then save.
+7. **Manage covers** – click the cover in the details panel to open the cover selector (see below).
 
 ## Cover management
 
@@ -373,7 +1061,6 @@ It asks for a music folder, a global artist/album/year, and then the title and t
 ├── .env.example            # Template for .env — committed, no secrets
 ├── .env                    # Local Docker settings (ignored by Git)
 ├── requirements.txt        # Python dependencies (mutagen)
-├── tests/                  # Dependency free test suite (PHP, Python, Compose, HTTP)
 ├── metadati.py             # Command-line interface
 ├── python/
 │   ├── core.py             # Python audio core (metadata + covers, mutagen)
@@ -416,13 +1103,14 @@ All endpoints return JSON. Success responses use `"success": true`, errors use `
 | `POST` | `/api/folders.php` | `{"action":"add","root":"music2","path":"Rock"}` / `{"action":"remove","id":"f_..."}` |
 | `GET` | `/api/library.php` | Scan every registered folder and return the merged, de-duplicated track list |
 | `GET` | `/api/tracks.php?path=/folder` | Return the list of tracks in a folder |
-| `GET` | `/api/metadata.php?path=/file` | Return the metadata of a single file |
-| `POST` | `/api/scan.php` | Scan a folder and return its tracks |
+| `GET` | `/api/metadata.php?path=/file` | Return the metadata of a single track |
 | `POST` | `/api/save.php` | Save metadata (and cover) of a track |
+| `POST` | `/api/scan.php` | Scan a folder and return its tracks |
 | `POST` | `/api/bulk-update.php` | Bulk save / cover / remove-cover operations |
 | `GET` | `/api/cover.php?path=/file` | Serve a cover image (folder JPEG or embedded) |
+| `GET` | `/api/audio.php?path=/file` | Stream audio with Range support |
 
-### Examples
+## API Examples
 
 List tracks:
 
@@ -473,7 +1161,7 @@ curl -X POST "http://localhost:8000/api/bulk-update.php" \
 
 - **Input validation** – all browser input is validated before reaching Python.
 - **Path normalization** – paths are resolved with `realpath()` and rejected if they do not exist.
-- **Path traversal protection** – when a music root is configured, only paths inside one of the roots are accepted. The folder browser never sends an absolute path: it sends a root identifier plus a relative path, and the server re-validates both with `realpath()`, which also blocks `..` and symlinks pointing outside the root.
+- **Path traversal protection** – when a library root is configured, only paths inside one of the roots are accepted.
 - **Command injection protection** – every argument passed to Python is shell-escaped with `escapeshellarg()`.
 - **Explicit writes** – audio files are never re-encoded; metadata and covers are written only when the user saves.
 - **No destructive operations** – cover images and audio files are never deleted, moved or renamed by the application.
@@ -487,45 +1175,15 @@ curl -X POST "http://localhost:8000/api/bulk-update.php" \
 - **`Permission denied` on install/start** – the scripts must be executable: `chmod +x install.sh start.sh`.
 - **Music directory inaccessible** – make sure the web server process can read the folder and that the path exists.
 - **`Invalid library folder` / empty library** – check the path in `web/config.local.php`, the `AUDIO_LIBRARY_OVERRIDE` environment variable, or the path typed in the interface.
-- **A folder shows MISSING in the dialog** – the disk behind that mount is unplugged or the container was started before the path was added to `.env`; reconnect it and run `docker compose up -d` again.
-- **A new `MUSIC_PATH_2` is ignored** – mounts are fixed at container start: after editing `.env` run `docker compose up -d --build`.
-- **`bind source path does not exist` at start-up** – the host folder in `MUSIC_PATH_2` / `MUSIC_PATH_3` does not exist; create it or correct the path.
 - **Port already in use** – start on another port: `./start.sh 8080`.
 - **Browser cannot connect** – make sure the server is running and check the URL/port.
 - **LAN access blocked** – allow the port in your firewall, and use your machine's LAN IP address.
-
-## Tests
-
-The suite needs no music library of yours and no external dependency: every test
-builds its own temporary directories and its own silent MP3 fixtures.
-
-```bash
-# PHP: roots, explorer, persistent folders, scanning, regressions
-php tests/run-tests.php
-
-# Optional: end-to-end tests that really run python/comm.py with mutagen
-AUDIO_PYTHON_BIN=.venv/bin/python php tests/run-tests.php
-
-# Python: discovery, metadata, covers, overlapping folders
-.venv/bin/python tests/test_scan.py
-
-# Docker Compose: single mount, three mounts, empty variable, no .env
-./tests/check-compose.sh
-
-# Header / mini player in a real headless Chrome (skips without Chrome)
-./tests/run-ui.sh
-
-# Real HTTP server, temporary library, JSON request bodies included
-AUDIO_PYTHON_BIN=.venv/bin/python ./tests/check-http.sh
-```
-
-Without mutagen the six end-to-end cases are reported as skipped instead of failed.
 
 ## Contributing
 
 The Python core lives in `python/core.py` (metadata and cover logic) and `python/comm.py` (JSON bridge for PHP). The PHP API is in `web/api/`, and the frontend is in `web/index.php` plus `web/assets/`.
 
-To test a change, start the server with `./start.sh` and exercise the interface, run the suite in `tests/`, or call the Python core directly:
+To test a change, start the server with `./start.sh` and exercise the interface, or call the Python core directly:
 
 ```bash
 .venv/bin/python python/comm.py list_tracks /path/to/your/music
@@ -536,4 +1194,3 @@ Please open an issue or a pull request on GitHub for bugs, improvements and docu
 ## License
 
 This project does not currently include a LICENSE file. Before publishing, choose an appropriate open-source license and add it, or contact the author to clarify the licensing terms.
-
