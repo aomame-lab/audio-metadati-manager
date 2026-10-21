@@ -265,9 +265,11 @@
                     <div class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div></div>
                 </div>
                 <div class="modal-footer justify-content-between align-items-center flex-wrap gap-2">
-                    <div class="form-check form-check-inline m-0">
-                        <input type="checkbox" class="form-check-input" id="coverApplyAllCheckbox">
-                        <label class="form-check-label small" for="coverApplyAllCheckbox">Apply to all tracks in this album/folder</label>
+                    <div>
+                        <button type="button" class="btn btn-outline-secondary" id="coverUploadBtn">
+                            <i class="bi bi-upload me-1"></i>Upload Cover
+                        </button>
+                        <input type="file" class="d-none" id="coverUploadInput" accept="image/jpeg,.jpg,.jpeg">
                     </div>
                     <div>
                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>

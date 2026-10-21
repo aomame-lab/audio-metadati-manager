@@ -69,6 +69,7 @@ async function waitFor(fn, tries = 60, delay = 250) {
     await send('Runtime.enable', {}, sessionId);
     await send('Log.enable', {}, sessionId);
     await send('Page.enable', {}, sessionId);
+    await send('DOM.enable', {}, sessionId);
     // Capture the <audio> object created by the app without touching app code.
     await send('Page.addScriptToEvaluateOnNewDocument', { source:
         "window.__ammAudio=[];const _A=window.Audio;window.Audio=function(...a){const e=new _A(...a);window.__ammAudio.push(e);return e;};" }, sessionId);
@@ -294,29 +295,127 @@ async function waitFor(fn, tries = 60, delay = 250) {
     for (const r of out) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
 
     /* ---------------------------------------------------------------
+       Part 1b — Select Cover dialog owns the upload control
+       --------------------------------------------------------------- */
+    const coverFile = path.join(FIXTURE_DIR || require('os').tmpdir(), 'ui-upload.jpg');
+    fs.writeFileSync(coverFile, Buffer.from(
+        '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==',
+        'base64'));
+
+    const coverBefore = await ev(`(async()=>{
+  const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
+  const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  $('#viewTracksBtn').click(); await sleep(800);
+  const row=$$('#tracksBody .track-row').find(r=>r.dataset.path && r.dataset.path.endsWith('Album One/02.mp3'))
+      || $$('#tracksBody .track-row')[0];
+  if(!row){ push('a track row is available for the cover test', false); return res; }
+  row.click(); await sleep(800);
+  push('track details no longer show a separate upload action', !$('#detailsPanel [data-action="upload-cover"]'));
+  const openBtn=$('#detailsPanel [data-action="open-cover"]');
+  push('the Select Cover button is still in the details', !!openBtn);
+  if(openBtn) openBtn.click();
+  await sleep(700);
+  const modal=$('#coverModal');
+  push('the Select Cover dialog opens', !!modal && modal.classList.contains('show'));
+  const uploadBtn=$('#coverUploadBtn');
+  push('the upload button is inside the dialog', !!uploadBtn && modal.contains(uploadBtn));
+  push('the upload button is visible inside the dialog',
+       !!uploadBtn && uploadBtn.offsetParent!==null && /upload/i.test(uploadBtn.textContent));
+  push('the apply-all checkbox is no longer in the dialog', !$('#coverApplyAllCheckbox'));
+  push('the cover chooser is rendered', !!$('#coverModalBody .cover-grid'));
+  return res;
+})()`);
+    for (const r of coverBefore) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
+    let coverChecks = coverBefore.length;
+
+    const doc = await send('DOM.getDocument', {}, sessionId);
+    const coverInput = await send('DOM.querySelector', {
+        nodeId: doc.result.root.nodeId,
+        selector: '#coverUploadInput'
+    }, sessionId);
+    if (coverInput.result && coverInput.result.nodeId) {
+        await send('DOM.setFileInputFiles', {
+            nodeId: coverInput.result.nodeId,
+            files: [coverFile]
+        }, sessionId);
+    } else {
+        fails++;
+        coverChecks++;
+        console.log('  FAIL  the dialog exposes a file input');
+    }
+
+    const coverAfter = await ev(`(async()=>{
+  const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
+  const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const name='ui-upload.jpg';
+  let option=null;
+  for(let i=0;i<40 && !option;i++){
+    await sleep(250);
+    option=$$('#coverModalBody .cover-option').find(o=>o.querySelector('.name') && o.querySelector('.name').textContent.trim()===name);
+  }
+  push('the uploaded image appears in the dialog', !!option);
+  if(option){
+    option.click(); await sleep(250);
+    push('the uploaded image can be selected', option.classList.contains('selected'));
+    $('#coverApplyBtn').click(); await sleep(900);
+    push('the cover dialog closes after applying', !$('#coverModal').classList.contains('show'));
+    push('the single track is marked as unsaved', !!$('#detailsPanel .badge-unsaved'));
+    const save=$('#detailsPanel [data-action="save"]');
+    push('the single-track save button is available', !!save);
+    if(save) save.click();
+    let saved=false;
+    for(let i=0;i<40 && !saved;i++){ await sleep(250); saved=!!$('#detailsPanel .badge-saved'); }
+    push('the single-track cover is saved', saved);
+  }
+  return res;
+})()`);
+    for (const r of coverAfter) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
+    coverChecks += coverAfter.length;
+    await ev(`(async()=>{
+        document.querySelector('#viewArtistsBtn').click();
+        await new Promise(r=>setTimeout(r,600));
+        document.querySelectorAll('#toastContainer .toast .btn-close').forEach(b=>b.click());
+        await new Promise(r=>setTimeout(r,800));
+        return true;
+    })()`);
+    try { fs.unlinkSync(coverFile); } catch (e) { /* best effort */ }
+
+    /* ---------------------------------------------------------------
        Part 2 — a track whose file is not available any more
        --------------------------------------------------------------- */
     if (FIXTURE_DIR) {
-        // The file of the first track of the album used by the test above.
-        const broken = path.join(FIXTURE_DIR, 'music1', 'Rock', 'Album One', '01.mp3');
+        // A track that has not been used by the playback checks above, so the
+        // media cache cannot satisfy the request after the file is removed.
+        const broken = path.join(FIXTURE_DIR, 'music1', 'Rock', 'Album Two', '01.mp3');
         if (fs.existsSync(broken)) {
             fs.unlinkSync(broken);
             const brokenRes = await ev(`(async()=>{
   const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
   const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  const A=()=>window.__ammAudio[0];
-  const btn = $$('#artistTree .tv-play-btn').find(b=>b.dataset.path && b.dataset.path.endsWith('Album One/01.mp3'));
-  if(!btn){ push('the broken track is still listed in the view', false, 'button not found'); return res; }
+  $('#viewTracksBtn').click(); await sleep(600);
+  const btn = $$('#tracksBody .btn-play-row').find(b=>b.dataset.path && b.dataset.path.endsWith('Album Two/01.mp3'));
+  if(!btn){
+      push('the broken track is still listed in the view', false,
+           $$('#tracksBody .btn-play-row').map(b=>b.dataset.path).join(' | ') || 'no play buttons');
+      $('#viewArtistsBtn').click(); await sleep(600);
+      return res;
+  }
   push('the broken track is still listed in the view', true, btn.dataset.path);
   const before = document.querySelectorAll('#toastContainer .toast').length;
-  btn.click(); await sleep(1800);
+  btn.click();
+  let after = before;
+  for (let i = 0; i < 20 && after <= before; i++) {
+      await sleep(250);
+      after = document.querySelectorAll('#toastContainer .toast').length;
+  }
   push('a missing file does not break the interface', $('#miniPlayer')!==null && $('#miniTitle').textContent.length>0);
-  push('a missing file is reported to the user',
-       document.querySelectorAll('#toastContainer .toast').length>before,
-       'toasts='+document.querySelectorAll('#toastContainer .toast').length);
+  push('a missing file is reported to the user', after>before, 'toasts='+after);
   push('the animation is stopped after the error', !$('#miniPlayer').classList.contains('is-playing'));
   push('the player stays usable after the error', !$('#miniPlayPauseBtn').disabled);
+  $('#viewArtistsBtn').click(); await sleep(600);
   return res;
 })()`);
             for (const r of brokenRes) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
@@ -363,13 +462,13 @@ async function waitFor(fn, tries = 60, delay = 250) {
 
     // The "broken file" scenario deletes a track on purpose: the 404 of that
     // request is expected and is not a JavaScript error.
-    const expected404 = FIXTURE_DIR ? encodeURIComponent(path.join(FIXTURE_DIR, 'music1', 'Rock', 'Album One', '01.mp3')) : '';
+    const expected404 = FIXTURE_DIR ? encodeURIComponent(path.join(FIXTURE_DIR, 'music1', 'Rock', 'Album Two', '01.mp3')) : '';
     const errs = events.filter((e) => e.method === 'Log.entryAdded' && e.params.entry.level === 'error')
         .filter((e) => !(expected404 && (e.params.entry.url || '').includes(expected404)))
         .map((e) => e.params.entry.url ? e.params.entry.text + ' <- ' + e.params.entry.url : e.params.entry.text);
     console.log(`\n  console errors: ${errs.length}`);
     errs.slice(0, 6).forEach((e) => console.log('    ' + e));
-    console.log(`\n  UI checks: ${out.length + mob.length}, failed: ${fails}`);
+    console.log(`\n  UI checks: ${out.length + coverChecks + mob.length}, failed: ${fails}`);
     ws.close(); chrome.kill();
     process.exit(fails || errs.length ? 1 : 0);
 })().catch((e) => { console.error('DRIVER ERROR', e); process.exit(2); });

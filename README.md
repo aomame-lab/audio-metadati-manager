@@ -33,9 +33,9 @@ A command-line interface (CLI) for the same Python core is also included.
 - Album cover management:
   - JPEG/JPG files in the same folder as the audio are detected automatically (case-insensitive)
   - Choose between the available images
+  - Upload a new JPEG from the cover selector; uploaded files get a free name and never overwrite existing images
   - Embed the selected cover into the audio file when saving (original JPEG is never modified)
   - Remove an embedded cover without deleting the source JPEG
-  - Apply a cover to all tracks in an album/folder at once
   - No automatic cover downloads from the Internet
 - Clear unsaved/saved status indicators
 - Elegant, responsive dark UI (desktop, notebook, tablet)
@@ -1034,9 +1034,9 @@ The document root is the `web/` folder.
 
 - JPEG/JPG images (`.jpg`, `.jpeg`, `.JPG`, `.JPEG`, etc.) located in the same folder as an audio file are detected automatically.
 - Clicking a cover opens the cover selector, which shows every detected image as a thumbnail.
-- The selected image is **embedded into the audio file only when you save** – the source JPEG is never modified, moved, renamed or deleted.
+- Selecting an image marks it as the cover for the current track only; it is **embedded into the audio file only when you save** – the source JPEG is never modified, moved, renamed or deleted.
+- **Upload Cover** inside the selector adds a new JPEG to the album folder. The file gets a free name and existing images are never overwritten; the upload is not applied automatically to metadata.
 - **Remove Cover** removes the embedded artwork from the audio file without touching the JPEG on disk.
-- **Apply to all tracks in this album/folder** sets the same cover for the whole folder in one step.
 - The application never downloads covers from the Internet.
 
 ## Command-line interface
@@ -1108,6 +1108,7 @@ All endpoints return JSON. Success responses use `"success": true`, errors use `
 | `POST` | `/api/scan.php` | Scan a folder and return its tracks |
 | `POST` | `/api/bulk-update.php` | Bulk save / cover / remove-cover operations |
 | `GET` | `/api/cover.php?path=/file` | Serve a cover image (folder JPEG or embedded) |
+| `POST` | `/api/upload-album-cover.php` | Store a new JPEG in the album folder (`path`, `cover`); does not embed it |
 | `GET` | `/api/audio.php?path=/file` | Stream audio with Range support |
 
 ## API Examples

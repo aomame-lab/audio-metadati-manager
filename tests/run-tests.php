@@ -822,7 +822,7 @@ section('6. Files reachable in the served document root');
 const AMM_ENDPOINTS = [
     'config.php', 'tracks.php', 'scan.php', 'metadata.php', 'save.php',
     'bulk-update.php', 'cover.php', 'audio.php', 'upload-cover.php',
-    'browse.php', 'folders.php', 'library.php',
+    'upload-album-cover.php', 'browse.php', 'folders.php', 'library.php',
 ];
 
 /** Include-only files: reachable by URL but never a valid entry point. */
@@ -886,6 +886,7 @@ test('no endpoint ever answers with an empty body, on success or on error', func
         ['cover.php', []],
         ['audio.php', []],
         ['audio.php', ['path' => '/definitely/not/here.mp3']],
+        ['upload-album-cover.php', []],
     ];
     foreach ($probes as [$file, $get]) {
         // run_api_file() already fails on an empty body; assert the shape too.
@@ -909,6 +910,7 @@ test('a POST to an endpoint answers with JSON, never with an empty body', functi
         ['bulk-update.php', []],
         ['bulk-update.php', ['action' => 'nope']],
         ['scan.php', ['path' => '/definitely/not/here']],
+        ['upload-album-cover.php', ['path' => '/definitely/not/here.mp3']],
     ];
     foreach ($probes as [$file, $post]) {
         $res = call_endpoint($file, [], $post);

@@ -79,12 +79,22 @@ contains "folders dialog is in the markup"        "$page" 'id="foldersModal"'
 contains "mini player is in the header"           "$page" 'id="miniPlayer"'
 contains "mini player has the three controls"     "$page" 'id="miniPlayPauseBtn"'
 contains "library reload stays in the header"     "$page" 'id="reloadBtn"'
+contains "cover dialog exposes the upload button" "$page" 'id="coverUploadBtn"'
 case "$page" in
     *'id="libraryPath"'*) bad "the old library path input is gone from the header" ;;
     *)                   ok  "the old library path input is gone from the header" ;;
 esac
+case "$page" in
+    *'coverApplyAllCheckbox'*) bad "the apply-all checkbox is gone" ;;
+    *)                        ok  "the apply-all checkbox is gone" ;;
+esac
 appjs="$(curl -fsS "$BASE/assets/js/app.js" 2>/dev/null)"
 contains "assets/js/app.js is served"             "$appjs" 'openFoldersModal'
+contains "album cover upload is wired"            "$appjs" 'api/upload-album-cover.php'
+case "$appjs" in
+    *'data-action="upload-cover"'*) bad "track details have no separate upload button" ;;
+    *)                              ok  "track details have no separate upload button" ;;
+esac
 
 # ---------------------------------------------------------------- config
 cfg="$(curl -fsS "$BASE/api/config.php")"
@@ -132,6 +142,61 @@ fi
 # ---------------------------------------------------------------- library
 lib="$(curl -fsS "$BASE/api/library.php")"
 contains "library scan reads the registered folder" "$lib" '"filename":"02.mp3"'
+
+# ---------------------------------------------------------------- album cover upload
+COVER_JPEG_B64='/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q=='
+album_audio="$WORK_DIR/music1/Rock/Album A/01.mp3"
+album_dir_real="$(cd "$WORK_DIR/music1/Rock/Album A" && pwd -P)"
+cover1="$WORK_DIR/cover-source-1.jpg"
+cover2="$WORK_DIR/cover-source-2.jpg"
+php -r 'file_put_contents($argv[1], base64_decode($argv[2]));' "$cover1" "$COVER_JPEG_B64"
+php -r 'file_put_contents($argv[1], base64_decode($argv[2]) . "tail");' "$cover2" "$COVER_JPEG_B64"
+
+upload1="$(curl -sS -X POST \
+    -F "path=$album_audio" \
+    -F "cover=@$cover1;filename=front.jpg;type=image/jpeg" \
+    "$BASE/api/upload-album-cover.php")"
+contains "album cover upload accepted"          "$upload1" '"success":true'
+contains "upload uses the free original name"   "$upload1" '"name":"front.jpg"'
+first_path="$(printf '%s' "$upload1" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo is_array($d) && !empty($d["path"]) ? $d["path"] : "";')"
+if [ -n "$first_path" ] && [ -f "$first_path" ] && [ "$(dirname "$first_path")" = "$album_dir_real" ]; then
+    ok "upload is stored in the track album folder"
+else
+    bad "upload is stored in the track album folder (got '$first_path')"
+fi
+
+upload2="$(curl -sS -X POST \
+    -F "path=$album_audio" \
+    -F "cover=@$cover2;filename=front.jpg;type=image/jpeg" \
+    "$BASE/api/upload-album-cover.php")"
+contains "duplicate upload gets an alternative name" "$upload2" '"name":"front-1.jpg"'
+second_path="$(printf '%s' "$upload2" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo is_array($d) && !empty($d["path"]) ? $d["path"] : "";')"
+[ -n "$second_path" ] && [ -f "$second_path" ] && [ "$second_path" != "$first_path" ] \
+    && ok "duplicate upload creates a second file" \
+    || bad "duplicate upload creates a second file"
+cmp -s "$cover1" "$first_path" \
+    && ok "the existing image is not overwritten" \
+    || bad "the existing image is not overwritten"
+
+upload3="$(curl -sS -X POST \
+    -F "path=$album_audio" \
+    -F "cover=@$cover1;filename=../../escape.jpg;type=image/jpeg" \
+    "$BASE/api/upload-album-cover.php")"
+contains "client file name cannot traverse directories" "$upload3" '"name":"escape.jpg"'
+[ ! -e "$WORK_DIR/music1/Rock/escape.jpg" ] && [ ! -e "$WORK_DIR/escape.jpg" ] \
+    && ok "traversal file name is stored inside the album folder" \
+    || bad "traversal file name is stored inside the album folder"
+
+fake_cover="$WORK_DIR/not-an-image.jpg"
+printf 'this is not a JPEG' > "$fake_cover"
+rejected="$(curl -sS -X POST \
+    -F "path=$album_audio" \
+    -F "cover=@$fake_cover;filename=evil.jpg;type=image/jpeg" \
+    "$BASE/api/upload-album-cover.php")"
+contains "non-JPEG content is rejected"         "$rejected" '"success":false'
+[ ! -e "$album_dir_real/evil.jpg" ] \
+    && ok "rejected upload writes no file" \
+    || bad "rejected upload writes no file"
 
 # ---------------------------------------------------------------- removal
 rm_code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \

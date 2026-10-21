@@ -62,6 +62,11 @@
     };
 
     const basename = (p) => String(p || '').split(/[\\/]/).pop();
+    const dirnameOf = (p) => {
+        const s = String(p || '');
+        const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+        return i >= 0 ? s.slice(0, i) : '';
+    };
 
     function formatDuration(sec) {
         const s = Math.round(Number(sec) || 0);
@@ -1797,13 +1802,6 @@ for (const t of state.tracks) {
         const targets = ctx.type === 'single' ? [findTrack(ctx.path)] : ctx.paths.map(findTrack).filter(Boolean);
         const ref = targets[0];
 
-        const applyAllWrap = $('#coverApplyAllCheckbox').closest('.form-check');
-        if (ctx.type === 'single') {
-            applyAllWrap.style.display = '';
-        } else {
-            applyAllWrap.style.display = 'none';
-        }
-
         if (!ref) {
             body.innerHTML = '<div class="empty-state"><i class="bi bi-x-circle"></i><p>Track not found.</p></div>';
             return;
@@ -1883,26 +1881,55 @@ for (const t of state.tracks) {
             return;
         }
         const ctx = coverContext;
-        const targets = [ctx.path];
-
-        if ($('#coverApplyAllCheckbox').checked) {
-            const ref = findTrack(ctx.path);
-            const folder = ref ? ref.path.slice(0, ref.path.lastIndexOf('/')) : '';
-            const albumTracks = state.tracks
-                .filter((t) => t.path.slice(0, t.path.lastIndexOf('/')) === folder)
-                .map((t) => t.path);
-            targets.push(...albumTracks.filter((p) => !targets.includes(p)));
-        }
-
-        for (const p of targets) {
-            const pend = state.pending.get(p) || {};
-            pend.cover = coverChoice;
-            state.pending.set(p, pend);
-        }
+        const pend = state.pending.get(ctx.path) || {};
+        pend.cover = coverChoice;
+        state.pending.set(ctx.path, pend);
         renderView();
         if (state.currentPath) refreshDetails(state.currentPath);
         bootstrap.Modal.getInstance('#coverModal').hide();
-        toast(`Cover applied to ${targets.length} tracks — press "Save Changes" to embed it`, 'success', 'Cover');
+        toast('Cover selected — press "Save Changes" to embed it', 'success', 'Cover');
+    }
+
+    async function uploadAlbumCover(path, file) {
+        const isJpeg = file && (
+            /image\/jpe?g/i.test(file.type || '') || /\.(jpe?g)$/i.test(file.name || '')
+        );
+        if (!isJpeg) {
+            toast('Only JPEG images (.jpg / .jpeg) are supported', 'error', 'Cover');
+            return;
+        }
+        if (isBusy()) return;
+
+        const track = findTrack(path);
+        if (!track) return;
+
+        setBusy(true, 'Uploading cover...', file.name || '');
+        try {
+            const fd = new FormData();
+            fd.append('path', path);
+            fd.append('cover', file, file.name || 'cover.jpg');
+            const res = await api('api/upload-album-cover.php', { method: 'POST', body: fd });
+            if (!res || !res.path) throw new Error('Upload response missing the cover path');
+
+            const folder = dirnameOf(track.path);
+            state.tracks.forEach((t) => {
+                if (dirnameOf(t.path) !== folder) return;
+                if (!Array.isArray(t.covers)) t.covers = [];
+                if (!t.covers.includes(res.path)) t.covers.push(res.path);
+                t.covers.sort((a, b) => String(a).localeCompare(String(b)));
+            });
+
+            refreshDetails(path);
+            if (bootstrap.Modal.getInstance('#coverModal')
+                && coverContext && coverContext.type === 'single' && coverContext.path === path) {
+                openCoverModal({ type: 'single', path });
+            }
+            toast(`Cover image uploaded: ${res.name || basename(res.path)}. Select it in the dialog to use it.`, 'success', 'Cover');
+        } catch (err) {
+            toast(`Unable to upload cover: ${err.message}`, 'error', 'Cover');
+        } finally {
+            setBusy(false);
+        }
     }
 
 /* ---------- Bulk edit ---------- */
@@ -2284,6 +2311,18 @@ for (const t of state.tracks) {
         $('#bulkCoverClearBtn').addEventListener('click', clearBulkCover);
 
         $('#coverApplyBtn').addEventListener('click', applyCover);
+
+        const coverUploadBtn = $('#coverUploadBtn');
+        const coverUploadInput = $('#coverUploadInput');
+        if (coverUploadBtn && coverUploadInput) {
+            coverUploadBtn.addEventListener('click', () => coverUploadInput.click());
+            coverUploadInput.addEventListener('change', () => {
+                const file = coverUploadInput.files && coverUploadInput.files[0];
+                coverUploadInput.value = '';
+                if (!file || !coverContext) return;
+                uploadAlbumCover(coverContext.path, file);
+            });
+        }
 
         window.matchMedia('(min-width: 992px)').addEventListener('change', () => {
             if (state.currentPath) {
