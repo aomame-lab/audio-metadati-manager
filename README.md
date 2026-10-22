@@ -35,6 +35,7 @@ A command-line interface (CLI) for the same Python core is also included.
   - Choose between the available images
   - Upload a new JPEG from the cover selector; uploaded files get a free name and never overwrite existing images
   - Embed the selected cover into the audio file when saving (original JPEG is never modified)
+  - Bulk edit reuses the cover selector for all selected tracks in the same folder and applies the chosen cover on save
   - Remove an embedded cover without deleting the source JPEG
   - No automatic cover downloads from the Internet
 - Clear unsaved/saved status indicators
@@ -1027,7 +1028,7 @@ The document root is the `web/` folder.
 8. **Select a track** – click a row to open the details panel (side panel on desktop, off-canvas on mobile).
 5. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
 6. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
-6. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, apply, then save.
+6. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, choose a cover when all selected tracks share the same folder, apply, then save.
 7. **Manage covers** – click the cover in the details panel to open the cover selector (see below).
 
 ## Cover management
@@ -1035,8 +1036,10 @@ The document root is the `web/` folder.
 - JPEG/JPG images (`.jpg`, `.jpeg`, `.JPG`, `.JPEG`, etc.) located in the same folder as an audio file are detected automatically.
 - Clicking a cover opens the cover selector, which shows every detected image as a thumbnail.
 - Selecting an image marks it as the cover for the current track only; it is **embedded into the audio file only when you save** – the source JPEG is never modified, moved, renamed or deleted.
-- **Upload Cover** inside the selector adds a new JPEG to the album folder. The file gets a free name and existing images are never overwritten; the upload is not applied automatically to metadata.
-- **Remove Cover** removes the embedded artwork from the audio file without touching the JPEG on disk.
+- In **Bulk Edit**, **Select Cover** opens the same dialog for the common folder of the selected tracks. The choice is kept as a draft and applied to every selected track only when you press **Salva modifiche**. If the selected tracks belong to different folders, cover selection is disabled with an explanatory message.
+- **Upload Cover** inside the selector adds a new JPEG to the album folder. The file gets a free name and existing images are never overwritten; the upload is not applied automatically to metadata. In bulk, an uploaded image appears as a new selectable option and is applied only after selecting it and saving.
+- **Clear** in Bulk Edit discards the pending cover choice without removing covers already embedded in the audio files.
+- **Remove Cover** is available in the single-track selector and removes the embedded artwork without touching the JPEG on disk. It is not offered by the bulk selector.
 - The application never downloads covers from the Internet.
 
 ## Command-line interface

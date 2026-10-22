@@ -9,7 +9,7 @@ services:
       # For a persistent location outside the project, set MUSIC_PATH in .env to an absolute host path.
       # Example: MUSIC_PATH=/home/user/audio-metadati-manager/music
       # The ./music fallback creates a music folder in the project directory if .env is not configured.
-      - ${MUSIC_PATH:-./music}:/music
+      - /Users/macbookpro/Desktop/audio-metadati-manager-stabile/music:/music
       # Optional additional music mounts — each one gets its own stable container path.
       # To enable extra mounts, create a docker-compose.override.yml file (see docker-compose.extra.yml.example)
       # or uncomment the lines below and set MUSIC_PATH_2 / MUSIC_PATH_3 in .env.

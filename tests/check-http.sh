@@ -52,6 +52,8 @@ make_mp3() {
     done
 }
 make_mp3 "$WORK_DIR/music1/Rock/Album A/01.mp3"
+make_mp3 "$WORK_DIR/music1/Rock/Album A/02.mp3"
+make_mp3 "$WORK_DIR/music1/Rock/Album A/03.mp3"
 make_mp3 "$WORK_DIR/music2/Jazz/02.mp3"
 
 # ---------------------------------------------------------------- server
@@ -80,6 +82,8 @@ contains "mini player is in the header"           "$page" 'id="miniPlayer"'
 contains "mini player has the three controls"     "$page" 'id="miniPlayPauseBtn"'
 contains "library reload stays in the header"     "$page" 'id="reloadBtn"'
 contains "cover dialog exposes the upload button" "$page" 'id="coverUploadBtn"'
+contains "bulk dialog uses the shared cover selector" "$page" 'id="bulkCoverPickBtn"'
+contains "bulk dialog explains the shared-folder constraint" "$page" 'id="bulkCoverWarning"'
 case "$page" in
     *'id="libraryPath"'*) bad "the old library path input is gone from the header" ;;
     *)                   ok  "the old library path input is gone from the header" ;;
@@ -91,9 +95,14 @@ esac
 appjs="$(curl -fsS "$BASE/assets/js/app.js" 2>/dev/null)"
 contains "assets/js/app.js is served"             "$appjs" 'openFoldersModal'
 contains "album cover upload is wired"            "$appjs" 'api/upload-album-cover.php'
+contains "bulk cover opens the shared cover dialog" "$appjs" "type: 'bulk'"
 case "$appjs" in
     *'data-action="upload-cover"'*) bad "track details have no separate upload button" ;;
     *)                              ok  "track details have no separate upload button" ;;
+esac
+case "$appjs" in
+    *'bulkCoverInput'*) bad "the bulk dialog has no separate local file input" ;;
+    *)                  ok  "the bulk dialog has no separate local file input" ;;
 esac
 
 # ---------------------------------------------------------------- config
@@ -197,6 +206,33 @@ contains "non-JPEG content is rejected"         "$rejected" '"success":false'
 [ ! -e "$album_dir_real/evil.jpg" ] \
     && ok "rejected upload writes no file" \
     || bad "rejected upload writes no file"
+
+# ---------------------------------------------------------------- bulk cover save
+album_audio_2="$WORK_DIR/music1/Rock/Album A/03.mp3"
+bulk_body="$(php -r '
+    $tracks = [
+        ["path" => $argv[1], "title" => "Fixture", "artist" => "Bulk", "album" => "Album A", "album_artist" => "Bulk", "year" => "2020", "track" => 1, "total" => 3, "genre" => "Rock", "cover" => $argv[3]],
+        ["path" => $argv[2], "title" => "Fixture 3", "artist" => "Bulk", "album" => "Album A", "album_artist" => "Bulk", "year" => "2020", "track" => 3, "total" => 3, "genre" => "Rock", "cover" => $argv[3]],
+    ];
+    echo json_encode(["action" => "save", "tracks" => $tracks]);
+' "$album_audio" "$album_audio_2" "$first_path")"
+bulk="$(curl -sS -X POST -H 'Content-Type: application/json' -d "$bulk_body" "$BASE/api/bulk-update.php")"
+contains "bulk save accepts the folder cover"    "$bulk" '"success":true'
+contains "bulk save modifies every selected track" "$bulk" '"modified":2'
+
+embedded_ok=1
+for track in "$album_audio" "$album_audio_2"; do
+    curl -sS -o "$WORK_DIR/embedded.jpg" --get \
+        --data-urlencode "path=$track" --data-urlencode "embedded=1" \
+        "$BASE/api/cover.php" >/dev/null 2>&1
+    cmp -s "$cover1" "$WORK_DIR/embedded.jpg" || embedded_ok=0
+done
+[ "$embedded_ok" -eq 1 ] \
+    && ok "bulk save embeds the selected cover in every track" \
+    || bad "bulk save embeds the selected cover in every track"
+cmp -s "$cover1" "$first_path" \
+    && ok "the source JPEG is untouched by the bulk save" \
+    || bad "the source JPEG is untouched by the bulk save"
 
 # ---------------------------------------------------------------- removal
 rm_code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \

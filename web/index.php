@@ -321,19 +321,21 @@
                                         <img id="bulkCoverPreview" alt="Selected cover preview" hidden>
                                     </div>
                                     <div class="bulk-cover-side">
-                                        <input type="file" id="bulkCoverInput" accept="image/jpeg,.jpg,.jpeg" hidden>
                                         <div class="d-flex flex-wrap gap-2">
                                             <button type="button" class="btn btn-outline-secondary btn-sm" id="bulkCoverPickBtn">
-                                                <i class="bi bi-folder2-open me-1"></i><span id="bulkCoverPickLabel">Choose image...</span>
+                                                <i class="bi bi-images me-1"></i><span id="bulkCoverPickLabel">Select Cover</span>
                                             </button>
                                             <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="bulkCoverClearBtn">
                                                 <i class="bi bi-x-lg me-1"></i>Clear
                                             </button>
                                         </div>
-                                        <div class="form-text text-truncate" id="bulkCoverLabel">No file selected.</div>
+                                        <div class="form-text text-truncate" id="bulkCoverLabel">No cover selected.</div>
                                     </div>
                                 </div>
-                                <div class="form-text">JPEG only. The cover is embedded into all selected tracks when you save.</div>
+                                <div class="form-text" id="bulkCoverHint">Select a JPEG/JPG image from the album folder. The cover is embedded into all selected tracks when you save.</div>
+                                <div class="alert alert-warning py-2 px-3 small mb-0 mt-2 d-none" id="bulkCoverWarning">
+                                    Cover selection is available only when all selected tracks are in the same folder.
+                                </div>
                             </div>
                         </div>
                     </form>

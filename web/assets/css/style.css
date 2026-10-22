@@ -690,6 +690,10 @@ body {
 .modal-footer { border-top: 1px solid var(--border-soft); padding: 0.9rem 1.25rem; }
 .btn-close { filter: invert(0.7); }
 
+/* Cover dialog opened from Bulk Edit: keep Bulk Edit open underneath. */
+body.cover-modal-stacked .modal-backdrop { z-index: 1060; }
+body.cover-modal-stacked #coverModal { z-index: 1065; }
+
 .confirm-icon i { font-size: 2.4rem; color: var(--gold); }
 
 /* ---------- Toast ---------- */
