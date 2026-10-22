@@ -82,8 +82,10 @@ contains "mini player is in the header"           "$page" 'id="miniPlayer"'
 contains "mini player has the three controls"     "$page" 'id="miniPlayPauseBtn"'
 contains "library reload stays in the header"     "$page" 'id="reloadBtn"'
 contains "cover dialog exposes the upload button" "$page" 'id="coverUploadBtn"'
-contains "bulk dialog uses the shared cover selector" "$page" 'id="bulkCoverPickBtn"'
-contains "bulk dialog explains the shared-folder constraint" "$page" 'id="bulkCoverWarning"'
+case "$page" in
+    *'id="bulkCover'*) bad "bulk dialog no longer contains cover controls" ;;
+    *)                 ok  "bulk dialog no longer contains cover controls" ;;
+esac
 case "$page" in
     *'id="libraryPath"'*) bad "the old library path input is gone from the header" ;;
     *)                   ok  "the old library path input is gone from the header" ;;
@@ -95,14 +97,19 @@ esac
 appjs="$(curl -fsS "$BASE/assets/js/app.js" 2>/dev/null)"
 contains "assets/js/app.js is served"             "$appjs" 'openFoldersModal'
 contains "album cover upload is wired"            "$appjs" 'api/upload-album-cover.php'
-contains "bulk cover opens the shared cover dialog" "$appjs" "type: 'bulk'"
+contains "album headers open the shared cover dialog" "$appjs" 'choose-album-cover'
+contains "album cover uses the shared dialog context" "$appjs" "type: 'album'"
 case "$appjs" in
     *'data-action="upload-cover"'*) bad "track details have no separate upload button" ;;
     *)                              ok  "track details have no separate upload button" ;;
 esac
 case "$appjs" in
-    *'bulkCoverInput'*) bad "the bulk dialog has no separate local file input" ;;
-    *)                  ok  "the bulk dialog has no separate local file input" ;;
+    *'bulkCover'*) bad "the bulk dialog has no cover callbacks left" ;;
+    *)             ok  "the bulk dialog has no cover callbacks left" ;;
+esac
+case "$appjs" in
+    *'data-action="open-cover"'*) bad "track details no longer open the cover dialog" ;;
+    *)                            ok  "track details no longer open the cover dialog" ;;
 esac
 
 # ---------------------------------------------------------------- config
@@ -206,6 +213,28 @@ contains "non-JPEG content is rejected"         "$rejected" '"success":false'
 [ ! -e "$album_dir_real/evil.jpg" ] \
     && ok "rejected upload writes no file" \
     || bad "rejected upload writes no file"
+
+# ---------------------------------------------------------------- album cover save
+album_audio_2="$WORK_DIR/music1/Rock/Album A/03.mp3"
+album_cover_body="$(php -r '
+    echo json_encode(["action" => "cover", "paths" => [$argv[1], $argv[2]], "image" => $argv[3]]);
+' "$album_audio" "$album_audio_2" "$first_path")"
+album_cover="$(curl -sS -X POST -H 'Content-Type: application/json' -d "$album_cover_body" "$BASE/api/bulk-update.php")"
+contains "album cover action succeeds"               "$album_cover" '"success":true'
+contains "album cover action updates every track"    "$album_cover" '"modified":2'
+external_ok=1
+for track in "$album_audio" "$album_audio_2"; do
+    curl -sS -o "$WORK_DIR/album-embedded.jpg" --get \
+        --data-urlencode "path=$track" --data-urlencode "embedded=1" \
+        "$BASE/api/cover.php" >/dev/null 2>&1
+    cmp -s "$cover1" "$WORK_DIR/album-embedded.jpg" || external_ok=0
+done
+[ "$external_ok" -eq 1 ] \
+    && ok "album cover action embeds the image in every track" \
+    || bad "album cover action embeds the image in every track"
+cmp -s "$cover1" "$album_dir_real/cover.jpeg" \
+    && ok "album cover action updates the external cover.jpeg" \
+    || bad "album cover action updates the external cover.jpeg"
 
 # ---------------------------------------------------------------- bulk cover save
 album_audio_2="$WORK_DIR/music1/Rock/Album A/03.mp3"

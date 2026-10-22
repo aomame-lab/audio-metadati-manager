@@ -30,13 +30,12 @@ A command-line interface (CLI) for the same Python core is also included.
 - Search across title, artist, album, genre and filename
 - Filter by format (MP3/FLAC/M4A) and status (unsaved/saved)
 - **Built-in audio player**: play tracks directly from the library with a global HTML5 player (play/pause, next/previous, seek/progress bar, current time/duration, volume/mute); per-track Play/Pause button; single-track playback
-- Album cover management:
-  - JPEG/JPG files in the same folder as the audio are detected automatically (case-insensitive)
-  - Choose between the available images
-  - Upload a new JPEG from the cover selector; uploaded files get a free name and never overwrite existing images
-  - Embed the selected cover into the audio file when saving (original JPEG is never modified)
-  - Bulk edit reuses the cover selector for all selected tracks in the same folder and applies the chosen cover on save
-  - Remove an embedded cover without deleting the source JPEG
+- Album-level cover management:
+  - A **Scegli copertina** button in every album header in the Artists view
+  - The cover selector lists JPEG/JPG images from the folders of the album tracks; **Upload Cover** adds a new JPEG with a free name and never overwrites existing images
+  - Confirming the selection applies it to the whole album in one operation: the image is written as the external `cover.jpeg` in every album folder and embedded in the metadata of every album track
+  - Previous `cover.*` / `cpver.*` variants are preserved: before installing the new cover, each old variant is renamed to a unique five-letter name with the original extension
+  - Cover selection, upload and removal are no longer available in Track Details or Bulk Edit; all other metadata editing in those windows is unchanged
   - No automatic cover downloads from the Internet
 - Clear unsaved/saved status indicators
 - Elegant, responsive dark UI (desktop, notebook, tablet)
@@ -47,10 +46,6 @@ A command-line interface (CLI) for the same Python core is also included.
 ### Main interface
 
 ![alt text](screenshots/preview.png)
-
-### Bulk changes
-
-![alt text](screenshots/preview2.png)
 
 ## Architecture
 
@@ -1026,21 +1021,22 @@ The document root is the `web/` folder.
 6. **Select the music folders** (optional, once) – click **Cartelle musicali** in the toolbar to browse the mounted roots and register the folders you want in the library. See [Multiple music folders](#multiple-music-folders).
 7. **Play** – press the **Play** button of a track (artist/album tree or flat list) or of an album card. The header mini player takes over: it shows the title, and *Next* / *Previous* walk through the album (or through the visible list, when the playback was started from a single track of the flat list).
 8. **Select a track** – click a row to open the details panel (side panel on desktop, off-canvas on mobile).
-5. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
-6. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
-6. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the fields you want to change, choose a cover when all selected tracks share the same folder, apply, then save.
-7. **Manage covers** – click the cover in the details panel to open the cover selector (see below).
+9. **Edit metadata** – change any field in the details panel. The row is highlighted and marked **UNSAVED**.
+10. **Save changes** – click **Save** in the details panel, or use **Save** in the toolbar to save all pending changes at once.
+11. **Bulk changes** – tick the checkboxes of several tracks, click **Edit Selected**, fill the metadata fields you want to change and press **Salva modifiche**. The fields are applied and saved in one operation. Cover selection is not part of Bulk Edit.
+12. **Manage album covers** – in the Artists view, click **Scegli copertina** in an album header, choose an image (or upload a new one) and press **Apply**; no additional save is required. See [Cover management](#cover-management).
 
 ## Cover management
 
-- JPEG/JPG images (`.jpg`, `.jpeg`, `.JPG`, `.JPEG`, etc.) located in the same folder as an audio file are detected automatically.
-- Clicking a cover opens the cover selector, which shows every detected image as a thumbnail.
-- Selecting an image marks it as the cover for the current track only; it is **embedded into the audio file only when you save** – the source JPEG is never modified, moved, renamed or deleted.
-- In **Bulk Edit**, **Select Cover** opens the same dialog for the common folder of the selected tracks. The choice is kept as a draft and applied to every selected track only when you press **Salva modifiche**. If the selected tracks belong to different folders, cover selection is disabled with an explanatory message.
-- **Upload Cover** inside the selector adds a new JPEG to the album folder. The file gets a free name and existing images are never overwritten; the upload is not applied automatically to metadata. In bulk, an uploaded image appears as a new selectable option and is applied only after selecting it and saving.
-- **Clear** in Bulk Edit discards the pending cover choice without removing covers already embedded in the audio files.
-- **Remove Cover** is available in the single-track selector and removes the embedded artwork without touching the JPEG on disk. It is not offered by the bulk selector.
-- The application never downloads covers from the Internet.
+Cover management is centralized at album level in the Artists view.
+
+- Each album card has a **Scegli copertina** button. It opens the shared cover selector and does not expand or collapse the album.
+- The selector lists JPEG/JPG images (`.jpg`, `.jpeg`, `.JPG`, `.JPEG`, etc.) detected in the folders of the album tracks. **Upload Cover** adds a new JPEG to the album folder with a free name; existing images are never overwritten, and the upload is not applied automatically.
+- Pressing **Apply** performs the only save operation for the cover: the selected image is written as `cover.jpeg` in every folder represented by the album and is embedded in the metadata of every track of that album. No additional single-track save is required.
+- Existing `cover.*` / `cpver.*` images (`.jpg`, `.jpeg`, `.png`, `.webp`, case-insensitive) are preserved. Before installing the new external cover, every existing variant is renamed to a unique five-letter name with its original extension, except a `cover.jpeg` that already contains exactly the selected bytes: that file is left in place, other variants are still preserved, and no duplicate backup is created. `cover.jpeg` is the standard external cover filename.
+- External updates are transactional: if a folder update fails, the previous covers are restored. If a track cannot be embedded, the operation reports a partial result while the successfully updated tracks keep the new cover.
+- Track Details still shows the current cover preview, but it no longer offers cover selection, upload or removal. Bulk Edit has no cover controls; its metadata fields continue to work as before.
+- The album selector offers selection and upload, not cover removal. The application never downloads covers from the Internet.
 
 ## Command-line interface
 
@@ -1084,9 +1080,9 @@ It asks for a music folder, a global artist/album/year, and then the title and t
         ├── library.php         # GET  - scan every registered folder and merge
         ├── tracks.php          # GET  - list tracks
         ├── metadata.php        # GET  - track metadata
-        ├── save.php            # POST - save a track's metadata + cover
+        ├── save.php            # POST - save a track's metadata + optional cover
         ├── scan.php            # POST - scan a folder
-        ├── bulk-update.php     # POST - bulk metadata / cover operations
+        ├── bulk-update.php     # POST - bulk metadata / album cover / remove-cover
         ├── audio.php           # GET  - stream audio with Range support
         └── cover.php           # GET  - serve cover images
     └── assets/
@@ -1109,10 +1105,12 @@ All endpoints return JSON. Success responses use `"success": true`, errors use `
 | `GET` | `/api/metadata.php?path=/file` | Return the metadata of a single track |
 | `POST` | `/api/save.php` | Save metadata (and cover) of a track |
 | `POST` | `/api/scan.php` | Scan a folder and return its tracks |
-| `POST` | `/api/bulk-update.php` | Bulk save / cover / remove-cover operations |
+| `POST` | `/api/bulk-update.php` | Bulk metadata save, album cover (`action:"cover"`), remove-cover (`action:"remove_cover"`) |
 | `GET` | `/api/cover.php?path=/file` | Serve a cover image (folder JPEG or embedded) |
 | `POST` | `/api/upload-album-cover.php` | Store a new JPEG in the album folder (`path`, `cover`); does not embed it |
 | `GET` | `/api/audio.php?path=/file` | Stream audio with Range support |
+
+The web interface applies covers only from the album header. The single-track `save.php` cover field and the `bulk-update.php` `remove_cover` action remain available at API level.
 
 ## API Examples
 
@@ -1161,6 +1159,21 @@ curl -X POST "http://localhost:8000/api/bulk-update.php" \
       }'
 ```
 
+Apply one cover to an album (the same operation used by the album header):
+
+```bash
+curl -X POST "http://localhost:8000/api/bulk-update.php" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "action": "cover",
+        "paths": [
+          "/path/to/your/music/album/track1.m4a",
+          "/path/to/your/music/album/track2.m4a"
+        ],
+        "image": "/path/to/your/music/album/new-cover.jpg"
+      }'
+```
+
 ## Security
 
 - **Input validation** – all browser input is validated before reaching Python.
@@ -1168,7 +1181,7 @@ curl -X POST "http://localhost:8000/api/bulk-update.php" \
 - **Path traversal protection** – when a library root is configured, only paths inside one of the roots are accepted.
 - **Command injection protection** – every argument passed to Python is shell-escaped with `escapeshellarg()`.
 - **Explicit writes** – audio files are never re-encoded; metadata and covers are written only when the user saves.
-- **No destructive operations** – cover images and audio files are never deleted, moved or renamed by the application.
+- **Artwork preservation** – applying an album cover never deletes existing artwork: old cover variants are renamed to unique five-letter names, and audio files are never re-encoded.
 - **No half-open doors** – the shared include files that live inside the served document root (`web/config.php`, `web/api/bootstrap.php`, `web/api/library-roots.php`, `web/api/library-folders.php`) refuse direct requests with `403` and a JSON error. They used to answer `200` with an empty body, which looks exactly like a silent crash to a client calling `response.json()`.
 
 ## Troubleshooting

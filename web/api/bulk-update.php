@@ -11,7 +11,8 @@
  *
  * 2) action = "cover"
  *    { "action": "cover", "paths": [...], "image": "/path/to/cover.jpg" }
- *    Embeds the same image into all the listed tracks.
+ *    Applies one cover to a whole album atomically: updates the external
+ *    cover.jpeg of every album folder and embeds it into every track.
  *
  * 3) action = "remove_cover"
  *    { "action": "remove_cover", "paths": [...] }
@@ -89,19 +90,65 @@ switch ($action) {
         if ($imageReal === null || !is_file($imageReal)) {
             json_out(['success' => false, 'error' => 'Invalid cover image'], 400);
         }
+        $trackPaths = [];
         foreach ($paths as $p) {
             $real = resolve_in_library($p);
             if ($real === null || !is_file($real)) {
                 $errors[] = ['path' => (string) $p, 'error' => 'Invalid audio file'];
                 continue;
             }
-            $result = run_python(['set_cover', $real, $imageReal]);
-            if (!empty($result['success'])) {
-                $modified++;
-            } else {
-                $errors[] = ['path' => $real, 'error' => $result['error'] ?? 'Cover operation failed'];
-            }
+            $trackPaths[] = $real;
         }
+        // Album cover is one atomic operation: never update only the tracks
+        // that happen to still exist in a partially stale album.
+        if (!empty($errors)) {
+            array_unshift($errors, [
+                'path' => '',
+                'error' => 'One or more album tracks are no longer available',
+            ]);
+            json_out([
+                'success' => false,
+                'error' => 'One or more album tracks are no longer available',
+                'modified' => 0,
+                'failed' => count($errors),
+                'errors' => $errors,
+            ]);
+        }
+        $result = run_python(array_merge(['save_album_cover', $imageReal], $trackPaths));
+        $errors = [];
+        foreach (($result['failed'] ?? []) as $failure) {
+            if (!is_array($failure)) {
+                continue;
+            }
+            $errors[] = [
+                'path' => (string) ($failure['path'] ?? 'unknown'),
+                'error' => (string) ($failure['error'] ?? 'Cover operation failed'),
+            ];
+        }
+        if (empty($result['success'])) {
+            if (!empty($result['error'])) {
+                array_unshift($errors, ['path' => '', 'error' => (string) $result['error']]);
+            }
+            if (empty($errors)) {
+                $errors[] = ['path' => '', 'error' => 'Album cover operation failed'];
+            }
+            json_out([
+                'success' => false,
+                'error' => $errors[0]['error'],
+                'modified' => count($result['saved'] ?? []),
+                'failed' => count($errors),
+                'errors' => $errors,
+                'external' => $result['external'] ?? [],
+            ]);
+        }
+        $modified = count($result['saved'] ?? []);
+        json_out([
+            'success' => true,
+            'modified' => $modified,
+            'failed' => 0,
+            'errors' => [],
+            'external' => $result['external'] ?? [],
+        ]);
         break;
 
     case 'remove_cover':

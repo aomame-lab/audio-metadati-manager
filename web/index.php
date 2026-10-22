@@ -311,32 +311,6 @@
                                 <label class="form-label" for="bulkYear">Year</label>
                                 <input type="number" class="form-control" id="bulkYear" min="1000" max="2100">
                             </div>
-                            <div class="col-12">
-                                <label class="form-label" for="bulkCoverPickBtn">Cover</label>
-                                <div class="bulk-cover">
-                                    <div class="bulk-cover-preview" id="bulkCoverPreviewBox">
-                                        <div class="cover-placeholder" id="bulkCoverPlaceholder">
-                                            <i class="bi bi-image"></i><span>NO COVER</span>
-                                        </div>
-                                        <img id="bulkCoverPreview" alt="Selected cover preview" hidden>
-                                    </div>
-                                    <div class="bulk-cover-side">
-                                        <div class="d-flex flex-wrap gap-2">
-                                            <button type="button" class="btn btn-outline-secondary btn-sm" id="bulkCoverPickBtn">
-                                                <i class="bi bi-images me-1"></i><span id="bulkCoverPickLabel">Select Cover</span>
-                                            </button>
-                                            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="bulkCoverClearBtn">
-                                                <i class="bi bi-x-lg me-1"></i>Clear
-                                            </button>
-                                        </div>
-                                        <div class="form-text text-truncate" id="bulkCoverLabel">No cover selected.</div>
-                                    </div>
-                                </div>
-                                <div class="form-text" id="bulkCoverHint">Select a JPEG/JPG image from the album folder. The cover is embedded into all selected tracks when you save.</div>
-                                <div class="alert alert-warning py-2 px-3 small mb-0 mt-2 d-none" id="bulkCoverWarning">
-                                    Cover selection is available only when all selected tracks are in the same folder.
-                                </div>
-                            </div>
                         </div>
                     </form>
                 </div>

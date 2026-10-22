@@ -490,59 +490,6 @@ body {
     outline-offset: 2px;
 }
 
-/* ---------- Bulk edit: cover picker ---------- */
-.bulk-cover {
-    display: flex;
-    gap: 1rem;
-    align-items: stretch;
-}
-
-.bulk-cover-preview {
-    width: 96px;
-    height: 96px;
-    flex-shrink: 0;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    background: var(--surface-3);
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-faint);
-}
-.bulk-cover-preview img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-.bulk-cover-preview .cover-placeholder {
-    text-align: center;
-}
-.bulk-cover-preview .cover-placeholder i {
-    font-size: 1.6rem;
-    color: var(--gold-muted);
-    display: block;
-    margin-bottom: 0.2rem;
-}
-.bulk-cover-preview .cover-placeholder span {
-    font-size: 0.6rem;
-    letter-spacing: 0.08em;
-    font-weight: 700;
-}
-
-.bulk-cover-side {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 0.35rem;
-}
-.bulk-cover-side .form-text {
-    margin-bottom: 0;
-}
-
 /* ---------- Empty state ---------- */
 .empty-state {
     text-align: center;
@@ -572,21 +519,6 @@ body {
 .details-cover .cover-placeholder { text-align: center; }
 .details-cover .cover-placeholder i { font-size: 3rem; color: var(--gold-muted); display: block; margin-bottom: 0.4rem; }
 .details-cover .cover-placeholder span { font-size: 0.7rem; letter-spacing: 0.08em; font-weight: 700; }
-
-.cover-change-btn {
-    position: absolute; inset: auto 0 0 0;
-    width: 100%;
-    border: 0;
-    background: rgba(13, 14, 17, 0.72);
-    backdrop-filter: blur(4px);
-    color: var(--text);
-    font-size: 0.75rem;
-    padding: 0.45rem;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-}
-.details-cover:hover .cover-change-btn, .details-cover:focus-within .cover-change-btn { opacity: 1; }
-.cover-change-btn:hover { color: var(--gold); }
 
 .form-label {
     font-size: 0.7rem;
@@ -658,20 +590,6 @@ body {
     white-space: nowrap;
     font-family: var(--font-mono);
 }
-.cover-option .size { font-size: 0.65rem; color: var(--text-faint); }
-.cover-option .tag {
-    display: inline-block;
-    font-size: 0.6rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    padding: 0.15em 0.5em;
-    border-radius: 100px;
-    margin-top: 0.3rem;
-}
-.cover-option .tag.embedded { background: var(--gold-soft); color: var(--gold); }
-.cover-option .tag.remove { background: var(--danger-bg); color: var(--danger); }
-.cover-option .tag.current { background: var(--success-bg); color: var(--success); }
-
 /* ---------- Modals ---------- */
 .modal-content {
     background: var(--surface);
@@ -1031,6 +949,29 @@ body.cover-modal-stacked #coverModal { z-index: 1065; }
 }
 .album-year { font-variant-numeric: tabular-nums; }
 .album-count { font-variant-numeric: tabular-nums; }
+.album-cover-pick-btn {
+    margin-top: 0.3rem;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    line-height: 1.2;
+    padding: 0.25rem 0.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.album-cover-pick-btn:hover {
+    color: var(--gold);
+    border-color: var(--gold-muted);
+    background: var(--gold-soft);
+}
+.album-cover-pick-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 .album-tracks {
     background: var(--surface);

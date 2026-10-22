@@ -45,9 +45,8 @@
         muted: false,
     };
 
-    let coverContext = null;   // { type:'single', path } | { type:'bulk', paths:[] }
-    let coverChoice = null;    // path | '__remove__' | null
-    let bulkDraft = null;      // { cover: path, name: string } — copertina scelta nella finestra multipla, non ancora salvata
+    let coverContext = null;   // { type:'album', albumKey, paths:[] }
+    let coverChoice = null;    // path of the selected JPEG, or null
 
     /* ---------- Helpers ---------- */
     const $ = (sel, root = document) => root.querySelector(sel);
@@ -67,16 +66,6 @@
         const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
         return i >= 0 ? s.slice(0, i) : '';
     };
-
-    function commonFolderForPaths(paths) {
-        const folders = new Set();
-        for (const path of paths) {
-            const track = findTrack(path);
-            if (!track) return null;
-            folders.add(dirnameOf(track.path));
-        }
-        return paths.length > 0 && folders.size === 1 ? [...folders][0] : null;
-    }
 
     function formatDuration(sec) {
         const s = Math.round(Number(sec) || 0);
@@ -805,6 +794,11 @@ function buildLibraryModel() {
                                ${selN > 0 && selN < album.trackCount ? 'data-indeterminate="1"' : ''}>
                         <span class="album-count">${album.trackCount}</span>
                     </span>
+                    <button type="button" class="album-cover-pick-btn" data-action="choose-album-cover"
+                            data-album="${esc(album.key)}" data-label="${esc(album.name)}"
+                            aria-label="Scegli copertina per ${esc(album.name)}" title="Scegli copertina">
+                        <i class="bi bi-images" aria-hidden="true"></i><span>Scegli copertina</span>
+                    </button>
                 </div>
             </div>`;
     }
@@ -1258,11 +1252,7 @@ for (const t of state.tracks) {
         const inner = url
             ? `<img src="${esc(url)}" alt="Cover of ${esc(track.title || track.filename)}">`
             : `<div class="cover-placeholder"><i class="bi bi-music-note-beamed"></i><span>NO COVER</span></div>`;
-        return `
-            <div class="details-cover" tabindex="0" role="button" aria-label="Open cover selection">
-                ${inner}
-                <button type="button" class="cover-change-btn" data-action="open-cover"><i class="bi bi-images me-1"></i>Select Cover</button>
-            </div>`;
+        return `<div class="details-cover">${inner}</div>`;
     }
 
     function buildDetailsForm(track) {
@@ -1334,20 +1324,6 @@ for (const t of state.tracks) {
             });
         }
 
-        const coverBtn = container.querySelector('[data-action="open-cover"]');
-        if (coverBtn) {
-            coverBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                openCoverModal({ type: 'single', path });
-            });
-        }
-        const coverBox = container.querySelector('.details-cover');
-        if (coverBox) {
-            coverBox.addEventListener('click', (e) => {
-                if (e.target.closest('[data-action="open-cover"]')) return;
-                openCoverModal({ type: 'single', path });
-            });
-        }
     }
 
     function showDetails(path, force) {
@@ -1804,102 +1780,173 @@ for (const t of state.tracks) {
         await loadLibrary();
     }
 
-    /* ---------- Cover modal ---------- */
+    /* ---------- Album cover modal ---------- */
+    // The album header is the single place where a cover can be chosen. The
+    // selected image is applied to the whole album with one server operation.
+    function albumTracksForKey(key) {
+        return sortTracks(state.tracks.filter((track) => {
+            const artistKey = foldKey(artistNameOf(track)) || UNKNOWN_KEY + 'artist';
+            return albumKeyOf(artistKey, albumNameOf(track)) === key;
+        }));
+    }
+
+    // update_external_cover renames every old cover.*/cpver.* variant and
+    // creates cover.jpeg. Keep the in-memory cover lists in sync so reopening
+    // the dialog never offers files that were just renamed.
+    function syncExternalCovers(folders) {
+        const affected = new Set(folders);
+        state.tracks.forEach((track) => {
+            const folder = dirnameOf(track.path);
+            if (!affected.has(folder)) return;
+            if (!Array.isArray(track.covers)) track.covers = [];
+            track.covers = track.covers.filter((coverPath) => {
+                const name = basename(coverPath).toLowerCase();
+                const dot = name.lastIndexOf('.');
+                const stem = dot >= 0 ? name.slice(0, dot) : name;
+                const ext = dot >= 0 ? name.slice(dot) : '';
+                return !((stem === 'cover' || stem === 'cpver')
+                    && ['.jpg', '.jpeg', '.png', '.webp'].includes(ext));
+            });
+            const target = `${folder.replace(/[\\/]+$/, '')}/cover.jpeg`;
+            if (!track.covers.includes(target)) track.covers.push(target);
+            track.covers.sort((a, b) => String(a).localeCompare(String(b)));
+        });
+    }
+
+    function openAlbumCover(key) {
+        const album = findAlbum(key);
+        const tracks = albumTracksForKey(key);
+        if (tracks.length === 0) {
+            toast('No tracks found for this album', 'warning', 'Cover');
+            return;
+        }
+        openCoverModal({
+            type: 'album',
+            albumKey: key,
+            albumName: album ? album.name : 'album',
+            paths: tracks.map((track) => track.path),
+        });
+    }
+
     function showCoverModal() {
-        const stacked = coverContext && coverContext.type === 'bulk'
-            && !!document.querySelector('#bulkModal.show');
-        document.body.classList.toggle('cover-modal-stacked', stacked);
+        document.body.classList.remove('cover-modal-stacked');
         bootstrap.Modal.getOrCreateInstance('#coverModal').show();
     }
 
     function openCoverModal(ctx) {
-        const isBulk = ctx.type === 'bulk';
         coverContext = ctx;
         coverChoice = null;
         const body = $('#coverModalBody');
-        const targets = isBulk ? ctx.paths.map(findTrack).filter(Boolean) : [findTrack(ctx.path)];
+        const targets = ctx.paths.map(findTrack).filter(Boolean);
         const ref = targets[0];
 
         if (!ref) {
-            body.innerHTML = '<div class="empty-state"><i class="bi bi-x-circle"></i><p>Track not found.</p></div>';
-            return;
-        }
-
-        if (isBulk && commonFolderForPaths(ctx.paths) === null) {
-            body.innerHTML = '<div class="empty-state"><i class="bi bi-exclamation-triangle"></i><p>Cover selection is available only when all selected tracks are in the same folder.</p></div>';
+            body.innerHTML = '<div class="empty-state"><i class="bi bi-x-circle"></i><p>Album tracks not found.</p></div>';
             showCoverModal();
             return;
         }
 
         const options = [];
-        if (!isBulk && ref.has_cover) {
-            options.push({
-                kind: 'embedded',
-                id: '__embedded__',
-                url: `api/cover.php?path=${encodeURIComponent(ref.path)}&embedded=1`,
-                name: 'Embedded (current)',
-                tag: 'embedded',
-            });
-        }
-        (ref.covers || []).forEach((img) => {
-            options.push({
-                kind: 'image',
-                id: img,
-                url: `api/cover.php?path=${encodeURIComponent(img)}`,
-                name: basename(img),
-                tag: null,
+        const seen = new Set();
+        targets.forEach((track) => {
+            (track.covers || []).forEach((img) => {
+                if (seen.has(img)) return;
+                seen.add(img);
+                options.push({
+                    id: img,
+                    url: `api/cover.php?path=${encodeURIComponent(img)}`,
+                    name: basename(img),
+                });
             });
         });
-        if (!isBulk && ref.has_cover) {
-            options.push({
-                kind: 'remove',
-                id: '__remove__',
-                url: null,
-                name: 'Remove Cover',
-                tag: 'remove',
-            });
-        }
 
-        const targetLabel = isBulk
-            ? `Covers — apply to ${targets.length} selected tracks`
-            : `Available covers for "${ref.title || ref.filename}"`;
-
-        const current = isBulk
-            ? (bulkDraft && bulkDraft.cover ? bulkDraft.cover : null)
-            : mergedTrack(ref).cover;
-        if (isBulk && current !== null) coverChoice = current;
+        const targetLabel = `Covers — apply to all ${targets.length} tracks of "${ctx.albumName}"`;
 
         body.innerHTML = `
             <p class="text-muted small mb-3">${esc(targetLabel)}</p>
             <div class="cover-grid">
-                ${options.map((opt) => {
-                    const selected = current === opt.id || (current === '__embedded__' && opt.id === '__embedded__')
-                        || (current === null && opt.id === '__embedded__');
-                    return `
-                        <div class="cover-option ${selected ? 'selected' : ''}" data-choice="${esc(opt.id)}" role="button" tabindex="0" aria-label="${esc(opt.name)}">
-                            <div class="thumb">${opt.url ? `<img src="${esc(opt.url)}" alt="" loading="lazy">` : '<i class="bi bi-trash3"></i>'}</div>
-                            <div class="name" title="${esc(opt.name)}">${esc(opt.name)}</div>
-                            ${opt.tag ? `<span class="tag ${opt.tag}">${opt.tag === 'embedded' ? 'EMBEDDED' : 'REMOVE'}</span>` : ''}
-                        </div>`;
-                }).join('')}
+                ${options.map((opt) => `
+                    <div class="cover-option" data-choice="${esc(opt.id)}" role="button" tabindex="0" aria-label="${esc(opt.name)}">
+                        <div class="thumb"><img src="${esc(opt.url)}" alt="" loading="lazy"></div>
+                        <div class="name" title="${esc(opt.name)}">${esc(opt.name)}</div>
+                    </div>`).join('')}
             </div>
-            ${options.some((opt) => opt.kind === 'image') ? '' : '<p class="text-muted small mt-3">No JPEG found in this folder.</p>'}`;
+            ${options.length ? '' : '<p class="text-muted small mt-3">No JPEG found in the album folders. Upload a cover to continue.</p>'}`;
 
         body.querySelectorAll('.cover-option').forEach((opt) => {
-            const apply = () => {
+            const select = () => {
                 coverChoice = opt.dataset.choice;
                 body.querySelectorAll('.cover-option').forEach((o) => o.classList.toggle('selected', o === opt));
             };
-            opt.addEventListener('click', apply);
+            opt.addEventListener('click', select);
             opt.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    apply();
+                    select();
                 }
             });
         });
 
         showCoverModal();
+    }
+
+    async function applyAlbumCover(ctx) {
+        const paths = albumTracksForKey(ctx.albumKey).map((track) => track.path);
+        if (paths.length === 0) {
+            toast('No tracks found for this album', 'warning', 'Cover');
+            return;
+        }
+
+        setBusy(true, 'Updating album cover...', basename(coverChoice));
+        try {
+            const res = await api('api/bulk-update.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'cover', paths, image: coverChoice }),
+                tolerateFailure: true,
+            });
+            const errors = res.errors || [];
+            const failedPaths = new Set(errors.map((e) => e.path).filter(Boolean));
+            const operationFailed = errors.some((e) => !e.path);
+            let saved = 0;
+            if (!operationFailed) {
+                for (const path of paths) {
+                    if (failedPaths.has(path)) continue;
+                    const track = findTrack(path);
+                    if (track) {
+                        track.has_cover = true;
+                        track.coverVersion = (track.coverVersion || 0) + 1;
+                    }
+                    saved++;
+                }
+            }
+
+            if (!operationFailed) {
+                syncExternalCovers((res.external || []).map((entry) => entry.folder));
+            }
+
+            if (res.success) {
+                toast(`Album cover updated: ${saved} tracks`, 'success', 'Cover');
+            } else {
+                const firstError = errors.length ? errors[0].error : 'Unknown error';
+                toast(
+                    operationFailed
+                        ? `Album cover not updated: ${firstError}`
+                        : `Partial cover update: ${saved} updated, ${paths.length - saved} failed. ${firstError}`,
+                    'error',
+                    'Cover'
+                );
+            }
+
+            bootstrap.Modal.getInstance('#coverModal').hide();
+            computeTotals();
+            renderView();
+            if (state.currentPath) refreshDetails(state.currentPath);
+        } catch (err) {
+            toast(`Unable to update the album cover: ${err.message}`, 'error', 'Cover');
+        } finally {
+            setBusy(false);
+        }
     }
 
     function applyCover() {
@@ -1908,20 +1955,11 @@ for (const t of state.tracks) {
             return;
         }
         const ctx = coverContext;
-        if (ctx.type === 'bulk') {
-            bulkDraft = { cover: coverChoice, name: basename(coverChoice) };
-            renderBulkCover();
-            bootstrap.Modal.getInstance('#coverModal').hide();
-            toast('Cover selected — press "Salva modifiche" to apply it', 'success', 'Cover');
+        if (!ctx || ctx.type !== 'album') {
+            toast('Album cover context is no longer available', 'error', 'Cover');
             return;
         }
-        const pend = state.pending.get(ctx.path) || {};
-        pend.cover = coverChoice;
-        state.pending.set(ctx.path, pend);
-        renderView();
-        if (state.currentPath) refreshDetails(state.currentPath);
-        bootstrap.Modal.getInstance('#coverModal').hide();
-        toast('Cover selected — press "Save Changes" to embed it', 'success', 'Cover');
+        applyAlbumCover(ctx);
     }
 
     async function uploadAlbumCover(file) {
@@ -1935,43 +1973,29 @@ for (const t of state.tracks) {
         if (isBusy()) return;
 
         const ctx = coverContext;
-        if (!ctx) return;
+        if (!ctx || ctx.type !== 'album') return;
 
-        let refPath = null;
-        if (ctx.type === 'single') {
-            refPath = ctx.path;
-        } else if (ctx.type === 'bulk') {
-            const folder = commonFolderForPaths(ctx.paths);
-            if (folder === null) {
-                toast('Cover selection is available only when all selected tracks are in the same folder', 'error', 'Cover');
-                return;
-            }
-            const ref = ctx.paths.map(findTrack).find((t) => t && dirnameOf(t.path) === folder);
-            refPath = ref ? ref.path : null;
-        }
-
-        const track = refPath ? findTrack(refPath) : null;
-        if (!track) return;
+        const ref = ctx.paths.map(findTrack).find(Boolean);
+        if (!ref) return;
 
         setBusy(true, 'Uploading cover...', file.name || '');
         try {
             const fd = new FormData();
-            fd.append('path', refPath);
+            fd.append('path', ref.path);
             fd.append('cover', file, file.name || 'cover.jpg');
             const res = await api('api/upload-album-cover.php', { method: 'POST', body: fd });
             if (!res || !res.path) throw new Error('Upload response missing the cover path');
 
-            const folder = dirnameOf(track.path);
-            state.tracks.forEach((t) => {
-                if (dirnameOf(t.path) !== folder) return;
-                if (!Array.isArray(t.covers)) t.covers = [];
-                if (!t.covers.includes(res.path)) t.covers.push(res.path);
-                t.covers.sort((a, b) => String(a).localeCompare(String(b)));
+            const folder = dirnameOf(ref.path);
+            state.tracks.forEach((track) => {
+                if (dirnameOf(track.path) !== folder) return;
+                if (!Array.isArray(track.covers)) track.covers = [];
+                if (!track.covers.includes(res.path)) track.covers.push(res.path);
+                track.covers.sort((a, b) => String(a).localeCompare(String(b)));
             });
 
-            if (state.currentPath === refPath) refreshDetails(refPath);
             if (bootstrap.Modal.getInstance('#coverModal') && coverContext === ctx) {
-                openCoverModal(ctx);
+                openCoverModal({ ...ctx, paths: albumTracksForKey(ctx.albumKey).map((t) => t.path) });
             }
             toast(`Cover image uploaded: ${res.name || basename(res.path)}. Select it in the dialog to use it.`, 'success', 'Cover');
         } catch (err) {
@@ -1982,67 +2006,10 @@ for (const t of state.tracks) {
     }
 
 /* ---------- Bulk edit ---------- */
-    function renderBulkCover() {
-        const img = $('#bulkCoverPreview');
-        const ph = $('#bulkCoverPlaceholder');
-        const pickLabel = $('#bulkCoverPickLabel');
-        const fileLabel = $('#bulkCoverLabel');
-        const clearBtn = $('#bulkCoverClearBtn');
-        if (!img || !ph) return;
-
-        if (bulkDraft && bulkDraft.cover) {
-            img.src = `api/cover.php?path=${encodeURIComponent(bulkDraft.cover)}`;
-            img.hidden = false;
-            ph.classList.add('d-none');
-            if (pickLabel) pickLabel.textContent = 'Change Cover';
-            if (fileLabel) {
-                fileLabel.textContent = bulkDraft.name || basename(bulkDraft.cover);
-                fileLabel.title = fileLabel.textContent;
-            }
-            if (clearBtn) clearBtn.classList.remove('d-none');
-        } else {
-            img.removeAttribute('src');
-            img.hidden = true;
-            ph.classList.remove('d-none');
-            if (pickLabel) pickLabel.textContent = 'Select Cover';
-            if (fileLabel) {
-                fileLabel.textContent = 'No cover selected.';
-                fileLabel.removeAttribute('title');
-            }
-            if (clearBtn) clearBtn.classList.add('d-none');
-        }
-    }
-
-    function clearBulkCover() {
-        bulkDraft = null;
-        renderBulkCover();
-    }
-
-    function bulkCoverAllowed() {
-        return commonFolderForPaths([...state.selected]) !== null;
-    }
-
-    function updateBulkCoverAvailability() {
-        const allowed = bulkCoverAllowed();
-        const btn = $('#bulkCoverPickBtn');
-        const warning = $('#bulkCoverWarning');
-        if (btn) btn.disabled = !allowed;
-        if (warning) warning.classList.toggle('d-none', allowed);
-        return allowed;
-    }
-
-    function openBulkCoverModal() {
-        if (!updateBulkCoverAvailability()) {
-            toast('Cover selection is available only when all selected tracks are in the same folder', 'warning', 'Cover');
-            return;
-        }
-        openCoverModal({ type: 'bulk', paths: [...state.selected] });
-    }
-
     function discardBulkChanges() {
-        // Scarta solo le scelte della finestra multipla: non tocca i pending preesistenti
-        // (es. modifiche già aperte nel pannello dettagli) né i dati già salvati su disco.
-        clearBulkCover();
+        // Scarta solo le modifiche della finestra multipla: non tocca i pending
+        // preesistenti (es. modifiche già aperte nel pannello dettagli) né i dati
+        // già salvati su disco.
         renderView();
         toast('Bulk changes discarded', 'info', 'Bulk Edit');
     }
@@ -2057,8 +2024,6 @@ for (const t of state.tracks) {
         $('#bulkArtist').value = '';
         $('#bulkGenre').value = '';
         $('#bulkYear').value = '';
-        clearBulkCover();
-        updateBulkCoverAvailability();
         bootstrap.Modal.getOrCreateInstance('#bulkModal').show();
     }
 
@@ -2074,18 +2039,14 @@ for (const t of state.tracks) {
             ['year', $('#bulkYear').value.trim()],
         ].filter(([, v]) => v !== '');
 
-        const coverPath = bulkDraft && bulkDraft.cover ? bulkDraft.cover : '';
-
         let count = 0;
         for (const path of selected) {
             const pend = state.pending.get(path) || {};
             for (const [f, v] of fields) pend[f] = v;
-            if (coverPath) pend.cover = coverPath;
             if (Object.keys(pend).length === 0) continue;
             state.pending.set(path, pend);
             count++;
         }
-        clearBulkCover();
 
         if (count === 0) {
             bootstrap.Modal.getInstance('#bulkModal').hide();
@@ -2181,6 +2142,13 @@ for (const t of state.tracks) {
             if (editBtn) {
                 e.preventDefault();
                 showDetails(editBtn.dataset.path);
+                return;
+            }
+            const coverBtn = e.target.closest('[data-action="choose-album-cover"]');
+            if (coverBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                openAlbumCover(coverBtn.dataset.album);
                 return;
             }
             const artistToggle = e.target.closest('[data-action="toggle-artist"]');
@@ -2321,10 +2289,6 @@ for (const t of state.tracks) {
         $('#bulkBtn').addEventListener('click', openBulkModal);
         $('#bulkApplyBtn').addEventListener('click', applyBulk);
         $('#bulkCancelBtn').addEventListener('click', discardBulkChanges);
-
-        $('#bulkCoverPickBtn').addEventListener('click', openBulkCoverModal);
-
-        $('#bulkCoverClearBtn').addEventListener('click', clearBulkCover);
 
         $('#coverApplyBtn').addEventListener('click', applyCover);
 

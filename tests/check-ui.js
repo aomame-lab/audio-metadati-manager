@@ -295,44 +295,65 @@ async function waitFor(fn, tries = 60, delay = 250) {
     for (const r of out) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
 
     /* ---------------------------------------------------------------
-       Part 1b — Select Cover dialog owns the upload control
+       Part 1b — the album header owns the whole cover operation
        --------------------------------------------------------------- */
-    const coverFile = path.join(FIXTURE_DIR || require('os').tmpdir(), 'ui-upload.jpg');
+    const coverFile = path.join(require('os').tmpdir(), 'ui-album-upload.jpg');
     fs.writeFileSync(coverFile, Buffer.from(
         '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==',
         'base64'));
 
-    const coverBefore = await ev(`(async()=>{
+    const albumCoverBefore = await ev(`(async()=>{
   const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
   const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  $('#viewTracksBtn').click(); await sleep(800);
-  const row=$$('#tracksBody .track-row').find(r=>r.dataset.path && r.dataset.path.endsWith('Album One/02.mp3'))
-      || $$('#tracksBody .track-row')[0];
-  if(!row){ push('a track row is available for the cover test', false); return res; }
-  row.click(); await sleep(800);
-  push('track details no longer show a separate upload action', !$('#detailsPanel [data-action="upload-cover"]'));
-  const openBtn=$('#detailsPanel [data-action="open-cover"]');
-  push('the Select Cover button is still in the details', !!openBtn);
-  if(openBtn) openBtn.click();
-  await sleep(700);
-  const modal=$('#coverModal');
-  push('the Select Cover dialog opens', !!modal && modal.classList.contains('show'));
-  const uploadBtn=$('#coverUploadBtn');
-  push('the upload button is inside the dialog', !!uploadBtn && modal.contains(uploadBtn));
-  push('the upload button is visible inside the dialog',
-       !!uploadBtn && uploadBtn.offsetParent!==null && /upload/i.test(uploadBtn.textContent));
-  push('the apply-all checkbox is no longer in the dialog', !$('#coverApplyAllCheckbox'));
-  push('the cover chooser is rendered', !!$('#coverModalBody .cover-grid'));
-  return res;
-})()`);
-    for (const r of coverBefore) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-    let coverChecks = coverBefore.length;
-    let bulkChecks = 0;
+  $('#viewArtistsBtn').click(); await sleep(600);
+  if($$('#artistTree .album-card').length===0){ $$('#artistTree .artist-row').forEach(r=>r.click()); await sleep(800); }
+  const cards=$$('#artistTree .album-card');
+  const coverBtns=$$('#artistTree [data-action="choose-album-cover"]');
+  push('every album header has a cover button', cards.length>0 && coverBtns.length===cards.length,
+       coverBtns.length+' / '+cards.length);
+  push('album cover buttons are labelled "Scegli copertina"',
+       coverBtns.every(b=>/scegli copertina/i.test(b.textContent) && (b.getAttribute('aria-label')||'').length>5));
+  const card=cards.find(c=>{const l=c.querySelector('.album-play-btn');return l && l.dataset.label==='Album One';})
+      || cards.slice().sort((a,b)=>(parseInt(b.querySelector('.album-count').textContent,10)||0)-(parseInt(a.querySelector('.album-count').textContent,10)||0))[0];
+  const key=card.dataset.albumCard;
+  const toggle=card.querySelector('[data-action="toggle-album"]');
+  if(toggle.getAttribute('aria-expanded')!=='true'){ toggle.click(); await sleep(700); }
+  const block=$$('#artistTree .album-tracks').find(b=>b.dataset.album===key);
+  const paths=block ? [...block.querySelectorAll('tbody tr')].map(r=>r.dataset.trackRow) : [];
+  const expandedBefore=toggle.getAttribute('aria-expanded');
+  const btn=card.querySelector('[data-action="choose-album-cover"]');
+  btn.click(); await sleep(700);
+  push('the album cover button opens the shared dialog', $('#coverModal').classList.contains('show'));
+  push('the album cover button does not collapse the album',
+       toggle.getAttribute('aria-expanded')===expandedBefore);
+  push('the dialog names the whole album scope',
+       new RegExp('all '+paths.length+' tracks', 'i').test($('#coverModalBody').textContent),
+       $('#coverModalBody').textContent.trim().slice(0,120));
+  const names=$$('#coverModalBody .cover-option .name').map(e=>e.textContent.trim());
+  push('the album selector does not offer the embedded cover', !names.includes('Embedded (current)'));
+  push('the album selector does not offer Remove Cover', !names.includes('Remove Cover'));
+  push('an album without JPEGs shows the upload hint', /No JPEG found/i.test($('#coverModalBody').textContent));
 
-    const doc = await send('DOM.getDocument', {}, sessionId);
+  $('#viewTracksBtn').click(); await sleep(500);
+  const row=$$('#tracksBody .track-row')[0];
+  if(row){ row.click(); await sleep(600); }
+  push('track details no longer offer cover selection', !$('#detailsPanel [data-action="open-cover"]'));
+  push('track details no longer have a cover button', !$('#detailsPanel .cover-change-btn'));
+  $('#viewArtistsBtn').click(); await sleep(600);
+  if($$('#artistTree .album-card').length===0){ $$('#artistTree .artist-row').forEach(r=>r.click()); await sleep(800); }
+  const cardAgain=$$('#artistTree .album-card').find(c=>c.dataset.albumCard===key);
+  if(cardAgain){ cardAgain.querySelector('[data-action="choose-album-cover"]').click(); await sleep(600); }
+  return {checks:res,key:key,paths:paths};
+})()`);
+
+    let coverChecks = 0;
+    for (const r of albumCoverBefore.checks) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
+    coverChecks += albumCoverBefore.checks.length;
+
+    const coverDoc = await send('DOM.getDocument', {}, sessionId);
     const coverInput = await send('DOM.querySelector', {
-        nodeId: doc.result.root.nodeId,
+        nodeId: coverDoc.result.root.nodeId,
         selector: '#coverUploadInput'
     }, sessionId);
     if (coverInput.result && coverInput.result.nodeId) {
@@ -343,274 +364,103 @@ async function waitFor(fn, tries = 60, delay = 250) {
     } else {
         fails++;
         coverChecks++;
-        console.log('  FAIL  the dialog exposes a file input');
+        console.log('  FAIL  the album dialog exposes a file input');
     }
 
-    const coverAfter = await ev(`(async()=>{
-  const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
-  const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  const name='ui-upload.jpg';
-  let option=null;
-  for(let i=0;i<40 && !option;i++){
-    await sleep(250);
-    option=$$('#coverModalBody .cover-option').find(o=>o.querySelector('.name') && o.querySelector('.name').textContent.trim()===name);
-  }
-  push('the uploaded image appears in the dialog', !!option);
-  if(option){
-    option.click(); await sleep(250);
-    push('the uploaded image can be selected', option.classList.contains('selected'));
-    $('#coverApplyBtn').click(); await sleep(900);
-    push('the cover dialog closes after applying', !$('#coverModal').classList.contains('show'));
-    push('the single track is marked as unsaved', !!$('#detailsPanel .badge-unsaved'));
-    const save=$('#detailsPanel [data-action="save"]');
-    push('the single-track save button is available', !!save);
-    if(save) save.click();
-    let saved=false;
-    for(let i=0;i<40 && !saved;i++){ await sleep(250); saved=!!$('#detailsPanel .badge-saved'); }
-    push('the single-track cover is saved', saved);
-  }
-  return res;
-})()`);
-    for (const r of coverAfter) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-    coverChecks += coverAfter.length;
-    await ev(`(async()=>{
-        document.querySelector('#viewArtistsBtn').click();
-        await new Promise(r=>setTimeout(r,600));
-        document.querySelectorAll('#toastContainer .toast .btn-close').forEach(b=>b.click());
-        await new Promise(r=>setTimeout(r,800));
-        return true;
-    })()`);
-    try { fs.unlinkSync(coverFile); } catch (e) { /* best effort */ }
-
-    /* ---------------------------------------------------------------
-       Part 1c — bulk cover selection reuses the Select Cover dialog
-       --------------------------------------------------------------- */
-    if (FIXTURE_DIR) {
-        const bulkJpeg = Buffer.from(
-            '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==',
-            'base64');
-        const bulkCoverSource = path.join(FIXTURE_DIR, 'bulk-upload.jpg');
-        const bulkAlbumDir = path.join(FIXTURE_DIR, 'music1', 'Rock', 'Album One');
-        const bulkPreexistingPath = path.join(bulkAlbumDir, 'bulk-upload.jpg');
-        const bulkPreexistingBytes = Buffer.concat([bulkJpeg, Buffer.from('preexisting')]);
-        fs.mkdirSync(bulkAlbumDir, { recursive: true });
-        fs.writeFileSync(bulkPreexistingPath, bulkPreexistingBytes);
-        fs.writeFileSync(bulkCoverSource, bulkJpeg);
-
-        const bulkMixed = await ev(`(async()=>{
-  const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
-  const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  const pick=(suffix)=>{
-    const cb=$$('.select-track').find(c=>c.dataset.path && c.dataset.path.endsWith(suffix));
-    if(cb && !cb.checked) cb.click();
-    return !!cb;
-  };
-  $('#viewTracksBtn').click(); await sleep(600);
-  $$('.select-track').forEach(c=>{ if(c.checked) c.click(); });
-  await sleep(200);
-  pick('Album One/01.mp3'); await sleep(150);
-  pick('Album Two/01.mp3'); await sleep(150);
-  $('#bulkBtn').click(); await sleep(600);
-  push('bulk dialog opens for mixed folders', $('#bulkModal').classList.contains('show'));
-  push('mixed-folder cover selector is disabled', $('#bulkCoverPickBtn').disabled);
-  const warning=$('#bulkCoverWarning');
-  push('mixed-folder warning is visible', !!warning && !warning.classList.contains('d-none'));
-  push('mixed-folder warning explains the constraint', !!warning && /same folder/i.test(warning.textContent));
-  $('#bulkCancelBtn').click(); await sleep(500);
-  push('mixed-folder bulk dialog closes on cancel', !$('#bulkModal').classList.contains('show'));
-  return res;
-})()`);
-        for (const r of bulkMixed) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-        bulkChecks += bulkMixed.length;
-
-        const bulkBefore = await ev(`(async()=>{
-  const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
-  const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  const pick=(suffix)=>{
-    const cb=$$('.select-track').find(c=>c.dataset.path && c.dataset.path.endsWith(suffix));
-    if(cb && !cb.checked) cb.click();
-    return !!cb;
-  };
-  $('#deselectAllBtn').click(); await sleep(300);
-  pick('Album One/01.mp3'); await sleep(150);
-  pick('Album One/03.mp3'); await sleep(150);
-  $('#bulkBtn').click(); await sleep(600);
-  push('bulk dialog opens for a single album folder', $('#bulkModal').classList.contains('show'));
-  push('bulk no longer exposes a local file input', !$('#bulkCoverInput'));
-  push('same-folder cover selector is enabled', !$('#bulkCoverPickBtn').disabled);
-  push('same-folder warning is hidden', $('#bulkCoverWarning').classList.contains('d-none'));
-  $('#bulkCoverPickBtn').click(); await sleep(600);
-  push('Select Cover opens the shared cover dialog', $('#coverModal').classList.contains('show'));
-  const options=$$('#coverModalBody .cover-option');
-  push('the dialog lists covers from the album folder', options.length>0, options.length+' options');
-  push('bulk selector does not offer the embedded cover',
-       !options.some(o=>o.querySelector('.name') && o.querySelector('.name').textContent.trim()==='Embedded (current)'));
-  push('bulk selector does not offer Remove Cover',
-       !options.some(o=>o.querySelector('.name') && o.querySelector('.name').textContent.trim()==='Remove Cover'));
-  push('bulk cover dialog names the selection scope',
-       /2 selected tracks/.test($('#coverModalBody').textContent));
-  const cover=$('#coverModal'), bulk=$('#bulkModal');
-  push('the bulk dialog stays open behind Select Cover',
-       bulk.classList.contains('show') && getComputedStyle(bulk).display!=='none');
-  const bulkZ=parseInt(getComputedStyle(bulk).zIndex,10)||0;
-  const coverZ=parseInt(getComputedStyle(cover).zIndex,10)||0;
-  push('the cover dialog is stacked above the bulk dialog', coverZ>bulkZ, 'cover='+coverZ+' bulk='+bulkZ);
-  const backdrops=$$('.modal-backdrop');
-  const topBackdropZ=backdrops.length ? (parseInt(getComputedStyle(backdrops[backdrops.length-1]).zIndex,10)||0) : 0;
-  push('the cover backdrop dims the bulk dialog', topBackdropZ>bulkZ, 'backdrop='+topBackdropZ+' bulk='+bulkZ);
-  const applyRect=$('#coverApplyBtn').getBoundingClientRect();
-  const hit=document.elementFromPoint(applyRect.left+applyRect.width/2, applyRect.top+applyRect.height/2);
-  push('the cover controls are in front of the bulk dialog', !!hit && cover.contains(hit));
-  const outside=document.elementFromPoint(8,8);
-  push('clicks outside the cover dialog reach the cover layer', outside===cover);
-  outside.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window}));
-  outside.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
-  await sleep(900);
-  push('an outside click closes only the cover dialog',
-       !cover.classList.contains('show') && bulk.classList.contains('show'));
-  push('the bulk dialog keeps the page scroll-locked after the cover closes',
-       document.body.classList.contains('modal-open') && getComputedStyle(document.body).overflow==='hidden',
-       getComputedStyle(document.body).overflow);
-  push('the stacked-modal state is cleared', !document.body.classList.contains('cover-modal-stacked'));
-  $('#bulkCoverPickBtn').click(); await sleep(600);
-  push('the cover dialog can be reopened from the bulk dialog',
-       cover.classList.contains('show') && bulk.classList.contains('show'));
-  $('#coverModal .btn-close').click(); await sleep(900);
-  push('the cover close button closes only the cover dialog',
-       !cover.classList.contains('show') && bulk.classList.contains('show'));
-  push('the bulk dialog stays scroll-locked after closing the cover dialog',
-       document.body.classList.contains('modal-open') && getComputedStyle(document.body).overflow==='hidden');
-  $('#bulkCoverPickBtn').click(); await sleep(600);
-  push('the cover dialog reopens after closing it',
-       cover.classList.contains('show') && bulk.classList.contains('show'));
-  return res;
-})()`);
-        for (const r of bulkBefore) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-        bulkChecks += bulkBefore.length;
-
-        const bulkDoc = await send('DOM.getDocument', {}, sessionId);
-        const bulkInput = await send('DOM.querySelector', {
-            nodeId: bulkDoc.result.root.nodeId,
-            selector: '#coverUploadInput'
-        }, sessionId);
-        if (bulkInput.result && bulkInput.result.nodeId) {
-            await send('DOM.setFileInputFiles', {
-                nodeId: bulkInput.result.nodeId,
-                files: [bulkCoverSource]
-            }, sessionId);
-        } else {
-            fails++;
-            console.log('  FAIL  the bulk cover dialog exposes a file input');
-        }
-
-        const bulkAfterUpload = await ev(`(async()=>{
+    const albumCoverAfter = await ev(`(async()=>{
   const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
   const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   let option=null;
-  for(let i=0;i<40 && !option;i++){
+  for(let i=0;i<60 && !option;i++){
     await sleep(250);
-    option=$$('#coverModalBody .cover-option').find(o=>o.querySelector('.name') && o.querySelector('.name').textContent.trim()==='bulk-upload-1.jpg');
+    option=$$('#coverModalBody .cover-option').find(o=>o.querySelector('.name') && o.querySelector('.name').textContent.trim()==='ui-album-upload.jpg');
   }
-  push('the uploaded image appears with a non-conflicting name', !!option);
-  if(option){
-    push('the uploaded image is not applied automatically', !option.classList.contains('selected'));
-    option.click(); await sleep(250);
-    push('the uploaded image can be selected', option.classList.contains('selected'));
-    $('#coverApplyBtn').click(); await sleep(900);
-  }
-  push('the shared cover dialog closes after Apply', !$('#coverModal').classList.contains('show'));
-  push('the bulk dialog stays open after Apply', $('#bulkModal').classList.contains('show'));
-  push('the bulk draft shows the selected cover', $('#bulkCoverPreview') && !$('#bulkCoverPreview').hidden);
-  push('the bulk draft names the selected image', /bulk-upload-1\\.jpg/.test($('#bulkCoverLabel').textContent));
-  push('Clear is available for the bulk draft', !$('#bulkCoverClearBtn').classList.contains('d-none'));
-  push('Apply does not mark tracks as unsaved',
-       $$('#tracksBody .track-row.dirty-row').length===0);
-  return res;
-})()`);
-        for (const r of bulkAfterUpload) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-        bulkChecks += bulkAfterUpload.length;
-
-        const bulkSaved = await ev(`(async()=>{
-  const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
-  const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  $('#bulkApplyBtn').click();
+  push('the uploaded image appears in the album dialog', !!option);
+  if(!option) return res;
+  option.click(); await sleep(250);
+  push('the uploaded image can be selected', option.classList.contains('selected'));
+  $('#coverApplyBtn').click();
   let closed=false;
-  for(let i=0;i<80 && !closed;i++){ await sleep(250); closed=!$('#bulkModal').classList.contains('show'); }
-  push('the bulk dialog closes after saving', closed);
-  await sleep(600);
-  const paths=$$('#tracksBody .track-row')
-    .map(r=>r.dataset.path)
-    .filter(p=>p && (p.endsWith('Album One/01.mp3') || p.endsWith('Album One/03.mp3')));
-  const covers=await Promise.all(paths.map(async p=>{
+  for(let i=0;i<120 && !closed;i++){ await sleep(250); closed=!$('#coverModal').classList.contains('show'); }
+  push('Apply closes the album dialog after saving', closed);
+  await sleep(900);
+  push('Apply leaves no unsaved album tracks',
+       $$('#artistTree .tv-dirty').length===0, $$('#artistTree .tv-dirty').length+' dirty');
+  const paths=${JSON.stringify(albumCoverBefore.paths)};
+  const embedded=await Promise.all(paths.map(async p=>{
     const r=await fetch('api/cover.php?path='+encodeURIComponent(p)+'&embedded=1');
     return r.ok;
   }));
-  push('the selected cover is embedded in every selected track',
-       paths.length===2 && covers.every(Boolean), paths.length+' tracks');
-  push('the bulk save clears the pending state',
-       $$('#tracksBody .track-row.dirty-row').length===0);
+  push('the cover is embedded in every album track',
+       paths.length>0 && embedded.every(Boolean), embedded.filter(Boolean).length+' / '+paths.length);
+  const other=$$('#artistTree .album-card').find(c=>c.dataset.albumCard!==${JSON.stringify(albumCoverBefore.key)});
+  const otherPath=other ? (()=>{const k=other.dataset.albumCard;const b=$$('#artistTree .album-tracks').find(x=>x.dataset.album===k);return b?b.querySelector('tbody tr')?.dataset.trackRow:null;})() : null;
+  if(otherPath){
+    const r=await fetch('api/cover.php?path='+encodeURIComponent(otherPath)+'&embedded=1');
+    push('other albums are not touched by the album cover save', !r.ok);
+  }
+  const cardAgain=$$('#artistTree .album-card').find(c=>c.dataset.albumCard===${JSON.stringify(albumCoverBefore.key)});
+  if(cardAgain){
+    cardAgain.querySelector('[data-action="choose-album-cover"]').click(); await sleep(600);
+    const names=$$('#coverModalBody .cover-option .name').map(e=>e.textContent.trim());
+    push('reopening the dialog lists the new cover.jpeg', names.includes('cover.jpeg'), names.join(' | '));
+    $('#coverModal .btn-close').click(); await sleep(500);
+  }
   return res;
 })()`);
-        for (const r of bulkSaved) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-        bulkChecks += bulkSaved.length;
+    for (const r of albumCoverAfter) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
+    coverChecks += albumCoverAfter.length;
 
-        const uploadedPath = path.join(bulkAlbumDir, 'bulk-upload-1.jpg');
+    if (albumCoverBefore.paths.length) {
+        const albumDir = path.dirname(albumCoverBefore.paths[0]);
+        const externalCover = path.join(albumDir, 'cover.jpeg');
+        const uploadedCover = path.join(albumDir, 'ui-album-upload.jpg');
         const fileChecks = [
-            ['the uploaded JPEG is stored in the album folder', fs.existsSync(uploadedPath)],
-            ['the uploaded JPEG content is unchanged',
-                fs.existsSync(uploadedPath) && fs.readFileSync(uploadedPath).equals(bulkJpeg)],
-            ['the pre-existing JPEG is not overwritten',
-                fs.existsSync(bulkPreexistingPath) && fs.readFileSync(bulkPreexistingPath).equals(bulkPreexistingBytes)],
+            ['the album save creates the external cover.jpeg', fs.existsSync(externalCover)],
+            ['the external cover matches the selected image',
+                fs.existsSync(externalCover) && fs.existsSync(uploadedCover)
+                && fs.readFileSync(externalCover).equals(fs.readFileSync(uploadedCover))],
+            ['the uploaded source image is preserved', fs.existsSync(uploadedCover)],
         ];
         for (const [name, ok] of fileChecks) { if (!ok) fails++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`); }
-        bulkChecks += fileChecks.length;
+        coverChecks += fileChecks.length;
+    }
 
-        const bulkClear = await ev(`(async()=>{
+    const bulkWithoutCover = await ev(`(async()=>{
   const res=[];const push=(n,ok,x)=>res.push({n,ok,extra:x||''});
   const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  const pickOption=(name)=>{
-    const o=$$('#coverModalBody .cover-option').find(x=>x.querySelector('.name') && x.querySelector('.name').textContent.trim()===name);
-    if(o) o.click();
-    return !!o;
-  };
-  const track01=$$('#tracksBody .track-row').map(r=>r.dataset.path).find(p=>p && p.endsWith('Album One/01.mp3'));
-  $('#bulkCoverPickBtn').click(); await sleep(600);
-  push('the cover dialog reopens with the folder covers', $('#coverModal').classList.contains('show'));
-  push('an existing folder cover can be selected', pickOption('bulk-upload-1.jpg'));
-  $('#coverApplyBtn').click(); await sleep(800);
-  push('the existing cover becomes the bulk draft', !$('#bulkCoverPreview').hidden);
-  $('#bulkCoverClearBtn').click(); await sleep(300);
-  push('Clear removes the bulk draft preview', $('#bulkCoverPreview').hidden);
-  push('Clear resets the bulk draft label', /No cover selected/.test($('#bulkCoverLabel').textContent));
-  const kept=await fetch('api/cover.php?path='+encodeURIComponent(track01)+'&embedded=1');
-  push('Clear does not remove an already embedded cover', kept.ok);
-
-  $('#bulkCoverPickBtn').click(); await sleep(600);
-  pickOption('bulk-upload-1.jpg');
-  $('#coverApplyBtn').click(); await sleep(800);
-  push('a new bulk draft is selected before cancel', !$('#bulkCoverPreview').hidden);
-  $('#bulkCancelBtn').click(); await sleep(600);
-  push('Cancel closes the bulk dialog', !$('#bulkModal').classList.contains('show'));
-  push('Cancel does not create pending track changes',
-       $$('#tracksBody .track-row.dirty-row').length===0);
+  $('#viewTracksBtn').click(); await sleep(600);
+  $$('.select-track').slice(0,2).forEach(cb=>{ if(!cb.checked) cb.click(); });
+  await sleep(200);
+  $('#bulkBtn').click(); await sleep(600);
+  push('bulk dialog still opens', $('#bulkModal').classList.contains('show'));
+  push('bulk dialog no longer contains a cover picker', !$('#bulkCoverPickBtn'));
+  push('bulk dialog no longer contains cover preview controls', !$('#bulkCoverPreview') && !$('#bulkCoverLabel'));
+  push('bulk metadata fields are still available',
+       !!$('#bulkAlbum') && !!$('#bulkArtist') && !!$('#bulkGenre') && !!$('#bulkYear'));
+  const checked=$$('.select-track').find(cb=>cb.checked);
+  const selectedPath=checked ? checked.dataset.path : null;
+  $('#bulkGenre').value='BulkGenre';
+  $('#bulkApplyBtn').click();
+  let closed=false;
+  for(let i=0;i<100 && !closed;i++){ await sleep(250); closed=!$('#bulkModal').classList.contains('show'); }
+  push('bulk metadata save still closes the dialog', closed);
+  if(selectedPath){
+    const meta=await (await fetch('api/metadata.php?path='+encodeURIComponent(selectedPath))).json();
+    push('bulk metadata save still updates the selected tracks',
+         !!meta && meta.success && meta.track && meta.track.genre==='BulkGenre',
+         meta && meta.track ? meta.track.genre : 'no metadata');
+  }
+  $('#viewArtistsBtn').click(); await sleep(500);
   return res;
 })()`);
-        for (const r of bulkClear) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
-        bulkChecks += bulkClear.length;
+    let bulkChecks = 0;
+    for (const r of bulkWithoutCover) { if (!r.ok) fails++; console.log(`  ${r.ok ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '  [' + r.extra + ']' : ''}`); }
+    bulkChecks += bulkWithoutCover.length;
 
-        const uploadedStillThere = fs.existsSync(uploadedPath)
-            && fs.readFileSync(uploadedPath).equals(bulkJpeg);
-        if (!uploadedStillThere) fails++;
-        bulkChecks++;
-        console.log(`  ${uploadedStillThere ? 'PASS' : 'FAIL'}  the uploaded JPEG remains after cancelling the bulk dialog`);
-        try { fs.unlinkSync(bulkCoverSource); } catch (e) { /* best effort */ }
-    }
+    try { fs.unlinkSync(coverFile); } catch (e) { /* best effort */ }
 
     /* ---------------------------------------------------------------
        Part 2 — a track whose file is not available any more

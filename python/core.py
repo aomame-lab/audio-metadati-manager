@@ -3,6 +3,9 @@ import re
 import json
 import sys
 import base64
+import secrets
+import string
+import tempfile
 from mutagen.easyid3 import EasyID3
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
@@ -15,6 +18,11 @@ ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 
 SUPPORTED = (".mp3", ".flac", ".m4a")
 COVER_EXTS = (".jpg", ".jpeg")
+EXTERNAL_COVER_STEM = "cover"
+LEGACY_EXTERNAL_COVER_STEM = "cpver"
+EXTERNAL_COVER_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+EXTERNAL_COVER_NAME = "cover.jpeg"
+COVER_BACKUP_ATTEMPTS = 1000
 
 _covers_cache = {}
 
@@ -179,6 +187,14 @@ def cli_command(command, *args):
                 return json.dumps({"success": True, "present": False})
             return json.dumps({"success": True, "present": True, "mime": info["mime"], "data": info["data"]})
 
+        elif command == "save_album_cover":
+            if len(args) < 2:
+                return json.dumps({"success": False, "error": "Missing arguments"})
+            image = args[0]
+            if not os.path.isfile(image):
+                return json.dumps({"success": False, "error": "Cover image not found"})
+            return json.dumps(save_album_cover(image, args[1:]))
+
         else:
             return json.dumps({"success": False, "error": f"Unknown command: {command}"})
 
@@ -342,6 +358,256 @@ def find_covers(folder):
     return sorted(covers)
 
 
+def _random_cover_stem():
+    """Five random letters, e.g. aBcDe."""
+    return "".join(secrets.choice(string.ascii_letters) for _ in range(5))
+
+
+def _unique_cover_backup_path(folder, extension):
+    reserved = {EXTERNAL_COVER_STEM, LEGACY_EXTERNAL_COVER_STEM}
+    for _ in range(COVER_BACKUP_ATTEMPTS):
+        stem = _random_cover_stem()
+        if stem.lower() in reserved:
+            continue
+        candidate = os.path.join(folder, stem + extension)
+        if not os.path.lexists(candidate):
+            return candidate
+    raise RuntimeError("Unable to find a unique name for the previous cover")
+
+
+def _external_cover_files(folder):
+    """Return every external cover.* / cpver.* image, case-insensitively."""
+    try:
+        names = os.listdir(folder)
+    except OSError as exc:
+        raise RuntimeError(f"Unable to list the album folder: {exc}") from exc
+
+    covers = []
+    for name in names:
+        stem, extension = os.path.splitext(name)
+        if stem.lower() not in (EXTERNAL_COVER_STEM, LEGACY_EXTERNAL_COVER_STEM):
+            continue
+        if extension.lower() not in EXTERNAL_COVER_EXTS:
+            continue
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            covers.append(path)
+    return sorted(covers)
+
+
+def _write_cover_temp(folder, data):
+    fd, path = tempfile.mkstemp(prefix=".cover-", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(path, 0o644)
+        return path
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+
+
+def _restore_external_cover(result):
+    """Undo an update_external_cover result, keeping every old image reachable."""
+    target = result.get("path")
+    if not target:
+        return
+    errors = []
+    if result.get("changed"):
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            errors.append(f"remove new cover: {exc}")
+    for backup, original in reversed(result.get("backups", [])):
+        try:
+            os.replace(backup, original)
+        except OSError as exc:
+            errors.append(f"restore {original}: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
+def _update_external_cover_data(data, folder):
+    """Install already-read image bytes as the folder's external cover.jpeg."""
+    if not folder or not os.path.isdir(folder):
+        raise ValueError(f"Album folder not found: {folder}")
+    if not data:
+        raise ValueError("Cover image is empty")
+
+    target = os.path.join(folder, EXTERNAL_COVER_NAME)
+    existing = _external_cover_files(folder)
+    target_is_current = False
+    if os.path.isfile(target):
+        try:
+            with open(target, "rb") as handle:
+                target_is_current = handle.read() == data
+        except OSError:
+            pass
+
+    # Re-saving the same image must not duplicate backups in bulk operations.
+    # Other cover variants are still preserved, while cover.jpeg already holds
+    # the requested bytes. samefile also covers COVER.JPEG on case-insensitive
+    # filesystems.
+    to_backup = []
+    for path in existing:
+        if target_is_current:
+            try:
+                if os.path.samefile(path, target):
+                    continue
+            except OSError:
+                pass
+        to_backup.append(path)
+    if target_is_current and not to_backup:
+        return {"path": target, "changed": False, "backups": []}
+
+    temp_path = None if target_is_current else _write_cover_temp(folder, data)
+    result = {"path": target, "changed": False, "backups": []}
+    try:
+        for old_path in to_backup:
+            extension = os.path.splitext(old_path)[1]
+            backup = _unique_cover_backup_path(folder, extension)
+            os.rename(old_path, backup)
+            result["backups"].append((backup, old_path))
+
+        if temp_path is not None:
+            os.replace(temp_path, target)
+            result["changed"] = True
+        return result
+    except Exception as exc:
+        try:
+            _restore_external_cover(result)
+        except Exception as restore_exc:
+            raise RuntimeError(f"{exc}; unable to restore the previous cover: {restore_exc}") from exc
+        raise
+    finally:
+        if temp_path is not None and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def update_external_cover(image_path, folder):
+    """Make image_path the album's external cover.jpeg.
+
+    Every existing cover.* or cpver.* image (JPG/JPEG/PNG/WebP, any case) is
+    renamed to a unique five-letter name that keeps its original extension.
+    The operation is transactional: if anything fails, the previous files are
+    restored.
+    """
+    if not image_path or not os.path.isfile(image_path):
+        raise ValueError(f"Cover image not found: {image_path}")
+    with open(image_path, "rb") as handle:
+        data = handle.read()
+    return _update_external_cover_data(data, folder)
+
+
+def save_album_cover(image_path, track_paths):
+    """Apply one cover to every track of an album.
+
+    The image is read once, so it can safely live inside one of the folders
+    being updated. Every distinct album folder receives the same external
+    cover.jpeg; the embedded cover of every track is then replaced with it.
+    External updates are rolled back if a later folder update fails or if no
+    track could be embedded. Per-track embedding failures are reported while
+    the successfully updated tracks keep the new cover.
+    """
+    if not image_path or not os.path.isfile(image_path):
+        raise ValueError(f"Cover image not found: {image_path}")
+    extension = os.path.splitext(image_path)[1].lower()
+    if extension not in COVER_EXTS:
+        raise ValueError("Only JPEG/JPG covers are supported")
+
+    paths = []
+    seen = set()
+    for path in track_paths:
+        if not path:
+            continue
+        absolute = os.path.abspath(path)
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        paths.append(absolute)
+    if not paths:
+        raise ValueError("No tracks specified")
+    for path in paths:
+        if not os.path.isfile(path):
+            raise ValueError(f"Audio file not found: {path}")
+
+    with open(image_path, "rb") as handle:
+        data = handle.read()
+    if not data:
+        raise ValueError("Cover image is empty")
+
+    folders = []
+    for path in paths:
+        folder = os.path.dirname(path)
+        if folder not in folders:
+            folders.append(folder)
+
+    external = []
+    try:
+        for folder in folders:
+            external.append(_update_external_cover_data(data, folder))
+    except Exception as exc:
+        restore_errors = []
+        for result in reversed(external):
+            try:
+                _restore_external_cover(result)
+            except Exception as restore_exc:
+                restore_errors.append(str(restore_exc))
+        message = f"External cover update failed: {exc}"
+        if restore_errors:
+            message += "; unable to restore the previous cover: " + "; ".join(restore_errors)
+        raise RuntimeError(message) from exc
+
+    saved = []
+    failed = []
+    for path in paths:
+        folder = os.path.dirname(path)
+        try:
+            set_embedded_cover(path, os.path.join(folder, EXTERNAL_COVER_NAME))
+        except Exception as exc:
+            failed.append({"path": path, "error": str(exc)})
+        else:
+            saved.append(path)
+
+    # No audio file changed: leave the previous external covers in place too.
+    if not saved and failed:
+        restore_errors = []
+        for result in reversed(external):
+            try:
+                _restore_external_cover(result)
+            except Exception as restore_exc:
+                restore_errors.append(str(restore_exc))
+        if restore_errors:
+            failed.append({
+                "path": folders[0],
+                "error": "Unable to restore the previous external cover: " + "; ".join(restore_errors),
+            })
+
+    return {
+        "success": not failed,
+        "external": [
+            {"folder": os.path.dirname(result["path"]), "changed": bool(result["changed"])}
+            for result in external
+        ],
+        "saved": saved,
+        "failed": failed,
+    }
+
+
 def _embedded_cover_info(path):
     """Return a dict {'data': bytes, 'mime': str} or None."""
     ext = os.path.splitext(path)[1].lower()
@@ -442,12 +708,24 @@ def save_full(path, title, artist, album, album_artist, year, track, total, genr
     """Save the metadata and, when requested, embed or remove the cover.
 
     cover: "" (no change), "__remove__" (remove), or a JPEG path to embed.
+    A selected external JPEG also becomes the album's cover.jpeg; every
+    existing cover.*/cpver.* image is preserved under a unique random name.
     """
     save_tags(path, title, artist, album, album_artist, year, track, total, genre)
     if cover == "__remove__":
         remove_embedded_cover(path)
     elif cover:
-        set_embedded_cover(path, cover)
+        external = update_external_cover(cover, os.path.dirname(os.path.abspath(path)))
+        try:
+            set_embedded_cover(path, external["path"])
+        except Exception as exc:
+            try:
+                _restore_external_cover(external)
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    f"{exc}; unable to restore the previous external cover: {restore_exc}"
+                ) from exc
+            raise
 
 
 def track_info(path):
